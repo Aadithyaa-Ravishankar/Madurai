@@ -1,12 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'data/ward_data.dart'; // Add this import
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as htmlParser;
+import 'package:flutter/gestures.dart';
+import 'package:flutter/rendering.dart';
+import 'dart:ui' as ui;
+import 'dart:typed_data';
 
 void main() {
   runApp(const MyMapApp());
@@ -37,168 +41,222 @@ class MapPage extends StatefulWidget {
 }
 
 class _MapPageState extends State<MapPage> {
-  final MapController _mapController = MapController();
-  final List<Polygon> _polygons = [];
-  final List<Marker> _wardLabels = [];
-  final List<String> _wardNames = [];
-  final List<String> _wardDescriptions = [];
-  final List<String> _displayNames = [];
+  GoogleMapController? _mapController;
+  Set<Polygon> _polygons = {};
+  Set<Marker> _wardLabels = {};
+  List<String> _wardNames = [];
+  List<String> _wardDescriptions = [];
+  List<String> _displayNames = [];
+  List<String> _wardNumbers = [];
   final LatLng _maduraiCenter = const LatLng(9.9252, 78.1198);
-  double _currentZoom = 10.0;
+  double _currentZoom = 13.0;
   LatLngBounds? _mapBounds;
-  static const double _minZoomForLabels = 12.0; // Add this constant for minimum zoom level to show labels
-  String _councillorHtml = '';
+  static const double _minZoomForLabels = 13.0;
+  String? _councillorHtml;
+  Map<String, Map<String, String>> _councillorData = {};
+
+  // Add search-related variables
+  final TextEditingController _searchController = TextEditingController();
+  List<String> _searchSuggestions = [];
+  bool _isSearching = false;
+  OverlayEntry? _overlayEntry;
 
   // Enhanced ward colors with better visibility and contrast
   final List<Color> _wardColors = [
-    Colors.red.withOpacity(0.3),
-    Colors.blue.withOpacity(0.3),
-    Colors.green.withOpacity(0.3),
-    Colors.orange.withOpacity(0.3),
-    Colors.purple.withOpacity(0.3),
-    Colors.teal.withOpacity(0.3),
-    Colors.pink.withOpacity(0.3),
-    Colors.indigo.withOpacity(0.3),
-    Colors.brown.withOpacity(0.3),
-    Colors.cyan.withOpacity(0.3),
+    const Color(0xFFE3F2FD).withOpacity(0.85), // Light Blue
+    const Color(0xFFE8F5E9).withOpacity(0.85), // Light Green
+    const Color(0xFFF3E5F5).withOpacity(0.85), // Light Purple
+    const Color(0xFFFFEBEE).withOpacity(0.85), // Light Red
+    const Color(0xFFFFF3E0).withOpacity(0.85), // Light Orange
+    const Color(0xFFE0F7FA).withOpacity(0.85), // Light Cyan
+    const Color(0xFFF1F8E9).withOpacity(0.85), // Light Lime
+    const Color(0xFFFCE4EC).withOpacity(0.85), // Light Pink
+    const Color(0xFFEFEBE9).withOpacity(0.85), // Light Brown
+    const Color(0xFFE8EAF6).withOpacity(0.85), // Light Indigo
+    const Color(0xFFF9FBE7).withOpacity(0.85), // Light Yellow
+    const Color(0xFFE0F2F1).withOpacity(0.85), // Light Teal
+    const Color(0xFFF5F5F5).withOpacity(0.85), // Light Grey
+    const Color(0xFFEDE7F6).withOpacity(0.85), // Light Deep Purple
+    const Color(0xFFE8F5E9).withOpacity(0.85), // Light Green
+    const Color(0xFFE0F7FA).withOpacity(0.85), // Light Cyan
+    const Color(0xFFF3E5F5).withOpacity(0.85), // Light Purple
+    const Color(0xFFFFEBEE).withOpacity(0.85), // Light Red
+    const Color(0xFFFFF3E0).withOpacity(0.85), // Light Orange
+    const Color(0xFFE3F2FD).withOpacity(0.85), // Light Blue
+  ];
+
+  // Add stroke colors for better contrast
+  final List<Color> _wardStrokeColors = [
+    const Color(0xFF1976D2).withOpacity(0.8), // Blue
+    const Color(0xFF388E3C).withOpacity(0.8), // Green
+    const Color(0xFF7B1FA2).withOpacity(0.8), // Purple
+    const Color(0xFFD32F2F).withOpacity(0.8), // Red
+    const Color(0xFFF57C00).withOpacity(0.8), // Orange
+    const Color(0xFF0097A7).withOpacity(0.8), // Cyan
+    const Color(0xFF7CB342).withOpacity(0.8), // Lime
+    const Color(0xFFC2185B).withOpacity(0.8), // Pink
+    const Color(0xFF5D4037).withOpacity(0.8), // Brown
+    const Color(0xFF3F51B5).withOpacity(0.8), // Indigo
+    const Color(0xFFFBC02D).withOpacity(0.8), // Yellow
+    const Color(0xFF00796B).withOpacity(0.8), // Teal
+    const Color(0xFF616161).withOpacity(0.8), // Grey
+    const Color(0xFF512DA8).withOpacity(0.8), // Deep Purple
+    const Color(0xFF388E3C).withOpacity(0.8), // Green
+    const Color(0xFF0097A7).withOpacity(0.8), // Cyan
+    const Color(0xFF7B1FA2).withOpacity(0.8), // Purple
+    const Color(0xFFD32F2F).withOpacity(0.8), // Red
+    const Color(0xFFF57C00).withOpacity(0.8), // Orange
+    const Color(0xFF1976D2).withOpacity(0.8), // Blue
   ];
 
   // Custom HTTP client with DNS configuration
   final _httpClient = http.Client();
 
+  // Add a GlobalKey for the search bar
+  final GlobalKey _searchBarKey = GlobalKey();
+
+  Future<BitmapDescriptor> _createCustomMarkerIcon(String text) async {
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
+    
+    // Draw text
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset(0, 0),
+    );
+    
+    final picture = pictureRecorder.endRecording();
+    final image = await picture.toImage(textPainter.width.toInt(), textPainter.height.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadGeoJson();
+    _loadGeoJSON();
     _loadCouncillorHtml();
-    // Add initial zoom to Madurai
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _mapController.move(_maduraiCenter, 12.0); // Set initial zoom level to 12
-    });
+    _searchController.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _removeOverlay();
     _httpClient.close();
+    _mapController?.dispose();
     super.dispose();
   }
 
-  Future<void> _loadGeoJson() async {
+  Future<void> _loadGeoJSON() async {
     try {
-      debugPrint("Loading GeoJSON data...");
-      final String data = await rootBundle.loadString('assets/madurai_wards.geojson');
-      final Map<String, dynamic> geoJson = json.decode(data);
-
-      if (geoJson['features'] == null) {
-        debugPrint("No features found in GeoJSON");
-        return;
-      }
-
-      debugPrint("Found ${geoJson['features'].length} features in GeoJSON");
-
+      final String jsonString = await rootBundle.loadString('assets/madurai_wards.geojson');
+      final Map<String, dynamic> jsonData = json.decode(jsonString);
+      final List<dynamic> features = jsonData['features'];
+      
       final List<List<LatLng>> wardPoints = [];
       final List<String> wardNames = [];
       final List<String> wardDescriptions = [];
       final List<String> displayNames = [];
-      int unnamedWardCount = 1;
-
-      // Calculate bounds for coordinate scaling
+      final List<String> wardNumbers = [];
+      
       double minLat = double.infinity;
       double maxLat = -double.infinity;
       double minLng = double.infinity;
       double maxLng = -double.infinity;
 
-      // First pass: collect all points and calculate bounds
-      for (var feature in geoJson['features']) {
+      for (var feature in features) {
         try {
           final properties = feature['properties'];
-          String wardName = properties['Name']?.toString().trim() ?? 'Unnamed Ward ${unnamedWardCount++}';
-          String wardDescription = properties['Description']?.toString().trim() ?? 'No description available';
-          String wardNo = properties['Ward_No']?.toString().trim() ?? '';
+          final wardName = properties['Name']?.toString() ?? 'Unknown Ward';
+          final wardDescription = properties['Description']?.toString() ?? '';
+          final wardNo = properties['Ward_No']?.toString() ?? '';
           
-          // Remove any existing ward number from the name
-          wardName = wardName.replaceAll(RegExp(r'^Ward\s+\d+:\s*', caseSensitive: false), '');
-          wardName = wardName.replaceAll(RegExp(r'^WARD\s+NO:\s*\d+\s*', caseSensitive: false), '');
-          
-          // Store original ward name for map display
-          displayNames.add(wardName);
-          
-          // Add ward number to the name only for councillor lookup
-          if (wardNo.isNotEmpty) {
-            wardName = 'Ward $wardNo: $wardName';
+          // Clean the ward name by removing the ward number prefix if it exists
+          String displayName = wardName;
+          if (wardName.startsWith('WARD NO:') || wardName.startsWith('Ward')) {
+            displayName = wardName.split(':').last.trim();
           }
-          
-          debugPrint("\nProcessing ward: $wardName");
-          debugPrint("Display name: ${displayNames.last}");
+          displayNames.add(displayName);
+          wardNumbers.add(wardNo);
           
           final geometry = feature['geometry'];
-          if (geometry == null || geometry['coordinates'] == null) {
-            debugPrint("Skipping feature with null geometry");
+          if (geometry['type'] != 'MultiPolygon') {
+            debugPrint("Warning: Unexpected geometry type ${geometry['type']} for ward $wardName");
             continue;
           }
 
-          List<LatLng> points = [];
-          if (geometry['type'] == 'MultiPolygon') {
-            debugPrint("Found MultiPolygon geometry");
-            final List<dynamic> multiPolygon = geometry['coordinates'];
-            for (var polygon in multiPolygon) {
-              for (var ring in polygon) {
-                for (var coord in ring) {
-                  if (coord is List && coord.length >= 2) {
-                    double lat = coord[1] as double;
-                    double lng = coord[0] as double;
-                    
-                    if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-                      points.add(LatLng(lat, lng));
-                      
-                      minLat = minLat < lat ? minLat : lat;
-                      maxLat = maxLat > lat ? maxLat : lat;
-                      minLng = minLng < lng ? minLng : lng;
-                      maxLng = maxLng > lng ? maxLng : lng;
-                    } else {
-                      debugPrint("Invalid coordinates for ward $wardName: lat=$lat, lng=$lng");
-                    }
-                  }
-                }
+          // Process MultiPolygon coordinates
+          final List<dynamic> polygons = geometry['coordinates'];
+          final List<LatLng> allPoints = [];
+
+          for (var polygon in polygons) {
+            // Each polygon is a list of rings, where the first ring is the outer boundary
+            final List<dynamic> rings = polygon;
+            if (rings.isEmpty) continue;
+
+            // Process the outer ring (first ring)
+            final List<dynamic> outerRing = rings[0];
+            for (var coord in outerRing) {
+              if (coord is! List || coord.length < 2) {
+                debugPrint("Invalid coordinate format: $coord");
+                continue;
               }
-            }
-          } else if (geometry['type'] == 'Polygon') {
-            debugPrint("Found Polygon geometry");
-            final List<dynamic> polygon = geometry['coordinates'];
-            for (var ring in polygon) {
-              for (var coord in ring) {
-                if (coord is List && coord.length >= 2) {
-                  double lat = coord[1] as double;
-                  double lng = coord[0] as double;
-                  
-                  if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-                    points.add(LatLng(lat, lng));
-                    
-                    minLat = minLat < lat ? minLat : lat;
-                    maxLat = maxLat > lat ? maxLat : lat;
-                    minLng = minLng < lng ? minLng : lng;
-                    maxLng = maxLng > lng ? maxLng : lng;
-                  } else {
-                    debugPrint("Invalid coordinates for ward $wardName: lat=$lat, lng=$lng");
-                  }
-                }
+
+              // GeoJSON uses [longitude, latitude] order
+              double? lng;
+              double? lat;
+              try {
+                lng = (coord[0] is num) ? coord[0].toDouble() : double.tryParse(coord[0].toString());
+                lat = (coord[1] is num) ? coord[1].toDouble() : double.tryParse(coord[1].toString());
+              } catch (e) {
+                debugPrint("Error converting coordinates: $e");
+                continue;
               }
+
+              // Skip invalid coordinates
+              if (lng == null || lat == null || 
+                  lat < -90 || lat > 90 || 
+                  lng < -180 || lng > 180) {
+                debugPrint("Invalid coordinates: lat=$lat, lng=$lng");
+                continue;
+              }
+              
+              // Update bounds
+              minLat = minLat < lat ? minLat : lat;
+              maxLat = maxLat > lat ? maxLat : lat;
+              minLng = minLng < lng ? minLng : lng;
+              maxLng = maxLng > lng ? maxLng : lng;
+              
+              allPoints.add(LatLng(lat, lng));
             }
-          } else {
-            debugPrint("Unsupported geometry type: ${geometry['type']}");
           }
 
-          if (points.isNotEmpty) {
+          if (allPoints.isNotEmpty) {
             // Ensure the polygon is closed
-            if (points.first.latitude != points.last.latitude || 
-                points.first.longitude != points.last.longitude) {
-              points.add(points.first);
+            if (allPoints.first.latitude != allPoints.last.latitude || 
+                allPoints.first.longitude != allPoints.last.longitude) {
+              allPoints.add(allPoints.first);
             }
             
-            wardPoints.add(points);
-            wardNames.add(wardName);  // This is used for councillor lookup
+            wardPoints.add(allPoints);
+            wardNames.add(wardName);
             wardDescriptions.add(wardDescription);
-            debugPrint("Successfully added ward $wardName with ${points.length} points");
+            debugPrint("Successfully added ward $wardName with ${allPoints.length} points");
           } else {
             debugPrint("No valid points found for ward $wardName");
           }
@@ -217,43 +275,41 @@ class _MapPageState extends State<MapPage> {
 
       // Store the bounds for later use
       _mapBounds = LatLngBounds(
-        LatLng(minLat, minLng),
-        LatLng(maxLat, maxLng),
+        southwest: LatLng(minLat, minLng),
+        northeast: LatLng(maxLat, maxLng),
       );
 
       final List<Color> colors = _colorWards(wardPoints);
-      final List<Polygon> loadedPolygons = [];
-      final List<Marker> loadedLabels = [];
+      final Set<Polygon> loadedPolygons = {};
+      final Set<Marker> loadedLabels = {};
 
       // Second pass: create polygons with improved visibility settings
       for (int i = 0; i < wardPoints.length; i++) {
         try {
           final polygon = Polygon(
+            polygonId: PolygonId('ward_$i'),
             points: wardPoints[i],
-            color: colors[i],
-            borderColor: Colors.black,
-            borderStrokeWidth: 1.0,
-            isFilled: true,
+            fillColor: colors[i],
+            strokeColor: _wardStrokeColors[i % _wardStrokeColors.length],
+            strokeWidth: 1,
           );
           loadedPolygons.add(polygon);
 
-          // Calculate centroid and add label
-          final centroid = _calculateCentroid(wardPoints[i]);
+          // Calculate position and add label
+          final labelPosition = _findLabelPosition(wardPoints[i]);
+          final customIcon = await _createCustomMarkerIcon(displayNames[i]);
           final label = Marker(
-            point: centroid,
-            width: 100,
-            height: 40,
-            child: Text(
-              displayNames[i],  // Use displayNames instead of wardNames
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: _currentZoom * 0.8,
-                fontWeight: FontWeight.bold,
-                color: Colors.black,
-              ),
+            markerId: MarkerId('label_$i'),
+            position: labelPosition,
+            infoWindow: InfoWindow(
+              title: displayNames[i],
             ),
+            visible: _currentZoom >= _minZoomForLabels, // Set initial visibility
+            icon: customIcon,
+            anchor: const Offset(0.5, 0.5),
+            onTap: () {
+              _showWardDetails(i);
+            },
           );
           loadedLabels.add(label);
         } catch (e) {
@@ -272,14 +328,19 @@ class _MapPageState extends State<MapPage> {
         _wardDescriptions.addAll(wardDescriptions);
         _displayNames.clear();
         _displayNames.addAll(displayNames);
+        _wardNumbers.clear();
+        _wardNumbers.addAll(wardNumbers);
       });
 
       // Add a small delay before adjusting camera bounds
       await Future.delayed(const Duration(milliseconds: 500));
-      if (_mapBounds != null) {
-        _mapController.fitBounds(_mapBounds!, options: const FitBoundsOptions(
-          padding: EdgeInsets.all(100),
-        ));
+      if (_mapBounds != null && _mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLngBounds(
+            _mapBounds!,
+            100,
+          ),
+        );
       }
 
       debugPrint("\nSuccessfully loaded ${loadedPolygons.length} polygons");
@@ -295,13 +356,58 @@ class _MapPageState extends State<MapPage> {
 
   Future<void> _loadCouncillorHtml() async {
     try {
-      final String html = await rootBundle.loadString('assets/councillor.html');
-      setState(() {
-        _councillorHtml = html;
-      });
+      debugPrint('Loading councillor HTML...');
+      final String htmlContent = await rootBundle.loadString('assets/councillor.html');
+      _councillorHtml = htmlContent;
+      debugPrint('Successfully loaded councillor HTML');
+      debugPrint('HTML content length: ${htmlContent.length}');
+      _parseCouncillorData();
     } catch (e) {
       debugPrint('Error loading councillor HTML: $e');
     }
+  }
+
+  void _parseCouncillorData() {
+    if (_councillorHtml == null) {
+      debugPrint('Councillor HTML is null, cannot parse data');
+      return;
+    }
+
+    debugPrint('Parsing councillor data...');
+    final document = htmlParser.parse(_councillorHtml!);
+    final rows = document.querySelectorAll('table tr');
+    debugPrint('Found ${rows.length} rows in councillor table');
+
+    for (var row in rows) {
+      final cells = row.querySelectorAll('td');
+      if (cells.length >= 8) {
+        final wardNoRaw = cells[0].text.trim();
+        final wardNo = wardNoRaw.replaceAll(RegExp(r'[^0-9]'), '');
+        final name = cells[1].text.trim();
+        final address = cells[2].text.trim();
+        final contact = cells[3].text.trim();
+        final email = cells[4].text.trim();
+        final responsibility = cells[5].text.trim();
+        final party = cells[6].text.trim();
+        final photo = cells[7].querySelector('img')?.attributes['src'] ?? '';
+
+        debugPrint('Parsed ward $wardNo: $name');
+
+        _councillorData[wardNo] = {
+          'name': name,
+          'address': address,
+          'contact': contact,
+          'email': email,
+          'responsibility': responsibility,
+          'party': party,
+          'photo': photo,
+        };
+      } else {
+        debugPrint('Row has insufficient cells: ${cells.length}');
+      }
+    }
+    debugPrint('Finished parsing councillor data. Total entries: ${_councillorData.length}');
+    debugPrint('Available ward numbers: ${_councillorData.keys.join(', ')}');
   }
 
   List<Color> _colorWards(List<List<LatLng>> wardPoints) {
@@ -394,330 +500,574 @@ class _MapPageState extends State<MapPage> {
   }
 
   LatLng _calculateCentroid(List<LatLng> points) {
-    double area = 0;
-    double cx = 0;
-    double cy = 0;
-
-    for (int i = 0; i < points.length - 1; i++) {
-      double x1 = points[i].longitude;
-      double y1 = points[i].latitude;
-      double x2 = points[i + 1].longitude;
-      double y2 = points[i + 1].latitude;
-
-      double f = x1 * y2 - x2 * y1;
-      area += f;
-      cx += (x1 + x2) * f;
-      cy += (y1 + y2) * f;
+    if (points.isEmpty) return LatLng(0, 0);
+    
+    double sumLat = 0;
+    double sumLng = 0;
+    
+    for (var point in points) {
+      sumLat += point.latitude;
+      sumLng += point.longitude;
     }
-
-    area = area / 2;
-    cx = cx / (6 * area);
-    cy = cy / (6 * area);
-
-    return LatLng(cy, cx);
+    
+    return LatLng(sumLat / points.length, sumLng / points.length);
   }
 
-  void _showWardDialog(BuildContext context, String wardName) {
-    final wardData = maduraiWards[wardName] ?? WardData(
-      name: wardName,
-      code: 'N/A',
-      areas: ['Information not available'],
-      facilities: ['Information not available'],
-      population: 'Not available',
-      description: 'No information available for this ward',
-    );
+  LatLng _findLabelPosition(List<LatLng> points) {
+    if (points.isEmpty) return LatLng(0, 0);
+
+    // First try the centroid
+    LatLng centroid = _calculateCentroid(points);
+    if (_isPointInPolygon(centroid, points)) {
+      return centroid;
+    }
+
+    // If centroid is outside, find the point with maximum distance from the boundary
+    double maxDistance = -1;
+    LatLng bestPoint = points[0];
+
+    // Create a grid of points within the bounding box
+    double minLat = points.map((p) => p.latitude).reduce(min);
+    double maxLat = points.map((p) => p.latitude).reduce(max);
+    double minLng = points.map((p) => p.longitude).reduce(min);
+    double maxLng = points.map((p) => p.longitude).reduce(max);
+
+    // Use a grid of points to find the best position
+    const int gridSize = 10;
+    double latStep = (maxLat - minLat) / gridSize;
+    double lngStep = (maxLng - minLng) / gridSize;
+
+    for (int i = 0; i <= gridSize; i++) {
+      for (int j = 0; j <= gridSize; j++) {
+        LatLng testPoint = LatLng(
+          minLat + i * latStep,
+          minLng + j * lngStep,
+        );
+
+        if (_isPointInPolygon(testPoint, points)) {
+          // Calculate minimum distance to boundary
+          double minDistToBoundary = double.infinity;
+          for (int k = 0; k < points.length; k++) {
+            int nextK = (k + 1) % points.length;
+            double dist = _distanceToLineSegment(
+              testPoint,
+              points[k],
+              points[nextK],
+            );
+            minDistToBoundary = min(minDistToBoundary, dist);
+          }
+
+          if (minDistToBoundary > maxDistance) {
+            maxDistance = minDistToBoundary;
+            bestPoint = testPoint;
+          }
+        }
+      }
+    }
+
+    return bestPoint;
+  }
+
+  double _distanceToLineSegment(LatLng point, LatLng lineStart, LatLng lineEnd) {
+    double x = point.latitude;
+    double y = point.longitude;
+    double x1 = lineStart.latitude;
+    double y1 = lineStart.longitude;
+    double x2 = lineEnd.latitude;
+    double y2 = lineEnd.longitude;
+
+    double A = x - x1;
+    double B = y - y1;
+    double C = x2 - x1;
+    double D = y2 - y1;
+
+    double dot = A * C + B * D;
+    double lenSq = C * C + D * D;
+    double param = -1;
+
+    if (lenSq != 0) {
+      param = dot / lenSq;
+    }
+
+    double xx, yy;
+
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    double dx = x - xx;
+    double dy = y - yy;
+
+    return sqrt(dx * dx + dy * dy);
+  }
+
+  void _showWardDetails(int wardIndex) {
+    final wardName = _wardNames[wardIndex];
+    final wardDescription = _wardDescriptions[wardIndex];
+    final displayName = _displayNames[wardIndex];
+    final wardNo = _wardNumbers[wardIndex];
+
+    debugPrint('Raw ward name: $wardName');
+    debugPrint('Display name: $displayName');
+    debugPrint('Ward number from GeoJSON: $wardNo');
+    debugPrint('Councillor data keys: ${_councillorData.keys}');
+
+    Map<String, String>? councillorInfo = _councillorData[wardNo];
+    String councillorName = councillorInfo?['name'] ?? 'No councillor details available';
+    String councillorAddress = councillorInfo?['address'] ?? '';
+    String councillorContact = councillorInfo?['contact'] ?? '';
+    String councillorEmail = councillorInfo?['email'] ?? '';
+    String councillorResponsibility = councillorInfo?['responsibility'] ?? '';
+    String councillorParty = councillorInfo?['party'] ?? '';
+    String councillorPhoto = councillorInfo?['photo'] ?? '';
+
+    final wardData = maduraiWards[displayName] ?? maduraiWards[wardName];
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(
-            '${wardData.name} (${wardData.code})',
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          content: SingleChildScrollView(
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.95,
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.9,
+            ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (wardData.description != null) ...[
-                  Text(
-                    wardData.description!,
-                    style: const TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+                // Header
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(16),
+                      topRight: Radius.circular(16),
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                ],
-                _buildDetailSection('Areas', wardData.areas),
-                const SizedBox(height: 12),
-                _buildDetailSection('Facilities', wardData.facilities),
-                const SizedBox(height: 12),
-                Text(
-                  'Population: ${wardData.population}',
-                  style: const TextStyle(fontSize: 16),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Ward $wardNo',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          displayName,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Content
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (wardData != null) ...[
+                          if (wardData.description != null && wardData.description!.isNotEmpty) ...[
+                            _buildSectionHeader('Description'),
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[100],
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                wardData.description!,
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          _buildSectionHeader('Areas'),
+                          _buildListSection(wardData.areas),
+                          const SizedBox(height: 12),
+                          _buildSectionHeader('Facilities'),
+                          _buildListSection(wardData.facilities),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue[50],
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.people, color: Colors.blue, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Population: ${wardData.population}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        if (councillorName != 'No councillor details available') ...[
+                          const Divider(height: 24),
+                          _buildSectionHeader('Councillor Information'),
+                          const SizedBox(height: 12),
+                          if (councillorPhoto.isNotEmpty)
+                            Center(
+                              child: Container(
+                                height: 180,
+                                width: 180,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: Colors.blue, width: 2),
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(18),
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.network(
+                                        councillorPhoto,
+                                        fit: BoxFit.cover,
+                                        loadingBuilder: (context, child, loadingProgress) {
+                                          if (loadingProgress == null) return child;
+                                          return Container(
+                                            color: Colors.grey[200],
+                                            child: Center(
+                                              child: CircularProgressIndicator(
+                                                value: loadingProgress.expectedTotalBytes != null
+                                                    ? loadingProgress.cumulativeBytesLoaded /
+                                                        loadingProgress.expectedTotalBytes!
+                                                    : null,
+                                                strokeWidth: 2,
+                                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        errorBuilder: (context, error, stackTrace) {
+                                          return Container(
+                                            color: Colors.grey[200],
+                                            child: const Icon(Icons.person, size: 100, color: Colors.grey),
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 12),
+                          _buildInfoCard([
+                            _buildInfoRow(Icons.person, 'Name', councillorName),
+                            if (councillorParty.isNotEmpty)
+                              _buildInfoRow(Icons.flag, 'Party', councillorParty),
+                            if (councillorAddress.isNotEmpty)
+                              _buildInfoRow(Icons.location_on, 'Address', councillorAddress),
+                            if (councillorContact.isNotEmpty)
+                              _buildInfoRow(Icons.phone, 'Contact', councillorContact),
+                            if (councillorEmail.isNotEmpty)
+                              _buildInfoRow(Icons.email, 'Email', councillorEmail),
+                            if (councillorResponsibility.isNotEmpty)
+                              _buildInfoRow(Icons.work, 'Responsibility', councillorResponsibility),
+                          ]),
+                        ] else ...[
+                          const Divider(height: 24),
+                          Center(
+                            child: Column(
+                              children: [
+                                Icon(Icons.info_outline, size: 36, color: Colors.grey[400]),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'No councillor details available',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                // Footer
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text(
+                          'Close',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
         );
       },
     );
   }
 
-  Widget _buildDetailSection(String title, List<dynamic> items) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$title:',
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Colors.blue,
         ),
-        const SizedBox(height: 4),
-        ...items.map((item) => Padding(
-          padding: const EdgeInsets.only(left: 16),
-          child: Text(
-            '• $item',
-            style: const TextStyle(fontSize: 16),
+      ),
+    );
+  }
+
+  Widget _buildListSection(List<dynamic> items) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: items.map((item) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('• ', style: TextStyle(fontSize: 13)),
+              Expanded(
+                child: Text(
+                  item.toString(),
+                  style: const TextStyle(fontSize: 13),
+                ),
+              ),
+            ],
           ),
         )).toList(),
-      ],
+      ),
     );
   }
 
-  void _zoomIn() {
-    _mapController.move(_mapController.center, _mapController.zoom + 1);
-  }
-
-  void _zoomOut() {
-    _mapController.move(_mapController.center, _mapController.zoom - 1);
-  }
-
-  void _adjustCameraToBounds() {
-    if (_mapBounds != null) {
-      _mapController.fitBounds(_mapBounds!);
-    }
-  }
-
-  void _showWardDetails(String wardName, String description) {
-    // Extract ward number from ward name - improved extraction
-    final wardNo = wardName.replaceAll(RegExp(r'[^0-9]'), '');
-    debugPrint('Looking for ward number: $wardNo');
-    
-    if (wardNo.isEmpty) {
-        debugPrint('Could not extract ward number from ward name: $wardName');
-        showDialog(
-            context: context,
-            builder: (BuildContext context) {
-                return AlertDialog(
-                    title: Text(wardName),
-                    content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                            Text(description.isEmpty ? 'No description available' : description),
-                            const SizedBox(height: 16),
-                            const Text(
-                                'Councillor Information',
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text('Could not find ward number. Please try again.'),
-                        ],
-                    ),
-                    actions: [
-                        TextButton(
-                            onPressed: () {
-                                Navigator.of(context).pop();
-                            },
-                            child: const Text('Close'),
-                        ),
-                    ],
-                );
-            },
-        );
-        return;
-    }
-    
-    // Parse the HTML content
-    final document = htmlParser.parse(_councillorHtml);
-    
-    // Get councillor information from the HTML table
-    final rows = document.querySelectorAll('tr');
-    Map<String, dynamic>? councillorInfo;
-    
-    for (var row in rows) {
-        final cells = row.querySelectorAll('td');
-        if (cells.isNotEmpty) {
-            final cellText = cells[0].text.trim();
-            debugPrint('Checking cell: $cellText');
-            
-            // Extract ward number from the cell text - handle "WARD NO: X" format
-            final cellWardNo = cellText.replaceAll(RegExp(r'[^0-9]'), '');
-            debugPrint('Cell ward number: $cellWardNo');
-            
-            // Compare the ward numbers
-            if (cellWardNo == wardNo) {
-                debugPrint('Found matching ward row for ward $wardNo');
-                councillorInfo = {
-                    'name': cells[1].text.trim(),
-                    'address': cells[2].text.trim(),
-                    'contact': cells[3].text.trim(),
-                    'email': cells[4].text.trim(),
-                    'responsibility': cells[5].text.trim(),
-                    'party': cells[6].text.trim(),
-                    'photo': cells[7].querySelector('img')?.attributes['src'],
-                };
-                break;
-            }
-        }
-    }
-
-    if (councillorInfo == null) {
-        debugPrint('No councillor info found for ward $wardNo');
-        showDialog(
-            context: context,
-            builder: (BuildContext context) {
-                return AlertDialog(
-                    title: Text('Ward $wardNo: $wardName'),
-                    content: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                            Text(description.isEmpty ? 'No description available' : description),
-                            const SizedBox(height: 16),
-                            const Text(
-                                'Councillor Information',
-                                style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text('No councillor information available for this ward.'),
-                        ],
-                    ),
-                    actions: [
-                        TextButton(
-                            onPressed: () {
-                                Navigator.of(context).pop();
-                            },
-                            child: const Text('Close'),
-                        ),
-                    ],
-                );
-            },
-        );
-        return;
-    }
-
-    final name = councillorInfo['name'] as String? ?? 'N/A';
-    final address = councillorInfo['address'] as String? ?? 'N/A';
-    final contact = councillorInfo['contact'] as String? ?? 'N/A';
-    final email = councillorInfo['email'] as String?;
-    final responsibility = councillorInfo['responsibility'] as String? ?? 'N/A';
-    final party = councillorInfo['party'] as String? ?? 'N/A';
-    final photo = councillorInfo['photo'] as String?;
-
-    // Strip any leading 'WARD NO:' or 'Ward' prefix from wardName
-    final cleanWardName = wardName.replaceAll(RegExp(r'^(WARD\s+NO:|Ward\s+\d+:)\s*', caseSensitive: false), '');
-
-    showDialog(
-        context: context,
-        builder: (BuildContext context) {
-            return AlertDialog(
-                title: Text('Ward $wardNo: $cleanWardName'),
-                content: SingleChildScrollView(
-                    child: SizedBox(
-                        width: 500, // Set a fixed width for the details box
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                                if (description.isNotEmpty)
-                                    Padding(
-                                        padding: const EdgeInsets.only(bottom: 16.0),
-                                        child: Text(description),
-                                    ),
-                                const Divider(),
-                                const Text(
-                                    'Councillor Information',
-                                    style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                    ),
-                                ),
-                                const SizedBox(height: 8),
-                                if (photo != null)
-                                    Padding(
-                                        padding: const EdgeInsets.only(bottom: 16.0),
-                                        child: Image.network(
-                                            photo,
-                                            width: 200,
-                                            height: 200,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) {
-                                                debugPrint('Error loading image: $error');
-                                                return const SizedBox.shrink();
-                                            },
-                                        ),
-                                    ),
-                                _buildInfoRow('Name', name),
-                                _buildInfoRow('Address', address),
-                                _buildInfoRow('Contact', contact),
-                                _buildInfoRow('Email', email?.isEmpty ?? true ? 'N/A' : email!),
-                                _buildInfoRow('Responsibility', responsibility),
-                                _buildInfoRow('Party', party),
-                            ],
-                        ),
-                    ),
-                ),
-                actions: [
-                    TextButton(
-                        onPressed: () {
-                            Navigator.of(context).pop();
-                        },
-                        child: const Text('Close'),
-                    ),
-                ],
-            );
-        },
-    );
-  }
-
-  Widget _buildInfoRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4.0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              '$label:',
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(value),
+  Widget _buildInfoCard(List<Widget> children) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[300]!),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            spreadRadius: 1,
+            blurRadius: 4,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      child: Column(
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: Colors.blue),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _onSearchChanged() {
+    final query = _searchController.text.toLowerCase();
+    if (query.isEmpty) {
+      setState(() {
+        _searchSuggestions = [];
+        _isSearching = false;
+      });
+      _removeOverlay();
+      return;
+    }
+
+    // Filter ward names based on search query
+    final suggestions = _displayNames.where((name) {
+      return name.toLowerCase().contains(query) ||
+          _wardNumbers[_displayNames.indexOf(name)].toLowerCase().contains(query);
+    }).toList();
+
+    setState(() {
+      _searchSuggestions = suggestions;
+      _isSearching = true;
+    });
+
+    _showSuggestions();
+  }
+
+  void _showSuggestions() {
+    _removeOverlay();
+
+    if (_searchSuggestions.isEmpty) return;
+
+    final RenderBox? searchBarBox = _searchBarKey.currentContext?.findRenderObject() as RenderBox?;
+    if (searchBarBox == null) return;
+
+    final searchBarHeight = searchBarBox.size.height;
+    final searchBarPosition = searchBarBox.localToGlobal(Offset.zero);
+
+    _overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: searchBarPosition.dy + searchBarHeight + 4, // Position below search bar with 4px gap
+        left: 16,
+        right: 16,
+        child: Material(
+          elevation: 4,
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.3,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              shrinkWrap: true,
+              itemCount: _searchSuggestions.length,
+              itemBuilder: (context, index) {
+                final wardName = _searchSuggestions[index];
+                final wardIndex = _displayNames.indexOf(wardName);
+                final wardNo = _wardNumbers[wardIndex];
+                return ListTile(
+                  title: Text(wardName),
+                  subtitle: Text('Ward $wardNo'),
+                  onTap: () {
+                    _searchController.text = wardName;
+                    _zoomToWard(wardIndex);
+                    _removeOverlay();
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    Overlay.of(context).insert(_overlayEntry!);
+  }
+
+  void _removeOverlay() {
+    _overlayEntry?.remove();
+    _overlayEntry = null;
+  }
+
+  void _zoomToWard(int wardIndex) {
+    if (_mapController == null || wardIndex < 0 || wardIndex >= _polygons.length) return;
+
+    final polygon = _polygons.elementAt(wardIndex);
+    final points = polygon.points;
+
+    // Calculate bounds for the ward
+    double minLat = points[0].latitude;
+    double maxLat = points[0].latitude;
+    double minLng = points[0].longitude;
+    double maxLng = points[0].longitude;
+
+    for (var point in points) {
+      minLat = min(minLat, point.latitude);
+      maxLat = max(maxLat, point.latitude);
+      minLng = min(minLng, point.longitude);
+      maxLng = max(maxLng, point.longitude);
+    }
+
+    final bounds = LatLngBounds(
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
+    );
+
+    _mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(bounds, 50),
     );
   }
 
@@ -726,119 +1076,158 @@ class _MapPageState extends State<MapPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Madurai Ward Map'),
-        centerTitle: true,
-        elevation: 2,
+        backgroundColor: Colors.blue,
       ),
       body: Stack(
         children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              center: _maduraiCenter,
-              zoom: _currentZoom,
-              onTap: (tapPosition, point) {
-                // Check if tap is inside any ward polygon
-                for (int i = 0; i < _polygons.length; i++) {
-                  if (_isPointInPolygon(point, _polygons[i].points)) {
-                    // Add visual feedback when a ward is tapped
-                    setState(() {
-                      // Reset all polygons to their original color
-                      for (int j = 0; j < _polygons.length; j++) {
-                        _polygons[j] = Polygon(
-                          points: _polygons[j].points,
-                          color: _wardColors[j % _wardColors.length],
-                          borderColor: Colors.black,
-                          borderStrokeWidth: 1.0,
-                          isFilled: true,
-                        );
-                      }
-                      // Highlight the selected ward
-                      _polygons[i] = Polygon(
-                        points: _polygons[i].points,
-                        color: _wardColors[i % _wardColors.length].withOpacity(0.7),
-                        borderColor: Colors.blue,
-                        borderStrokeWidth: 2.0,
-                        isFilled: true,
-                      );
-                    });
-                    _showWardDetails(_wardNames[i], _wardDescriptions[i]);
-                    break;
-                  }
-                }
-              },
-              onPositionChanged: (position, hasGesture) {
-                setState(() {
-                  _currentZoom = position.zoom!;
-                });
-              },
+          GoogleMap(
+            initialCameraPosition: CameraPosition(
+              target: _maduraiCenter,
+              zoom: 13.0,
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.madurai_flutter_app',
-                tileProvider: NetworkTileProvider(
-                  headers: {
-                    'User-Agent': 'Madurai Ward Map App/1.0',
-                  },
-                ),
-              ),
-              PolygonLayer(
-                polygons: _polygons,
-              ),
-              if (_currentZoom >= _minZoomForLabels)
-                MarkerLayer(
-                  markers: _wardLabels,
-                ),
-            ],
+            onMapCreated: (GoogleMapController controller) {
+              _mapController = controller;
+              _loadGeoJSON();
+            },
+            onCameraMove: (CameraPosition position) {
+              _currentZoom = position.zoom;
+              _updateMarkerVisibility();
+            },
+            polygons: _polygons,
+            markers: _wardLabels,
+            onTap: (_) {
+              _removeOverlay();
+              setState(() {
+                _isSearching = false;
+              });
+            },
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+            mapType: MapType.normal,
+            compassEnabled: true,
+            tiltGesturesEnabled: true,
+            rotateGesturesEnabled: true,
+            scrollGesturesEnabled: true,
+            zoomGesturesEnabled: true,
+            buildingsEnabled: false,
+            trafficEnabled: false,
+            indoorViewEnabled: false,
           ),
-          Positioned(
-            right: 16,
-            bottom: 100,
-            child: Column(
-              children: [
-                FloatingActionButton(
-                  heroTag: 'zoomIn',
-                  mini: true,
-                  onPressed: _zoomIn,
-                  child: const Icon(Icons.add),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton(
-                  heroTag: 'zoomOut',
-                  mini: true,
-                  onPressed: _zoomOut,
-                  child: const Icon(Icons.remove),
-                ),
-                const SizedBox(height: 10),
-                FloatingActionButton(
-                  heroTag: 'reset',
-                  mini: true,
-                  onPressed: () {
-                    _mapController.move(_maduraiCenter, 12.0);
-                  },
-                  child: const Icon(Icons.center_focus_strong),
-                ),
-              ],
-            ),
-          ),
-          // Add a help text overlay
+          // Search bar with key
           Positioned(
             top: 16,
             left: 16,
             right: 16,
-            child: Card(
-              color: Colors.white.withOpacity(0.9),
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Text(
-                  'Tap on any ward to view its details and councillor information',
-                  style: TextStyle(
-                    color: Colors.black87,
-                    fontSize: 14,
+            child: Container(
+              key: _searchBarKey,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
                   ),
-                  textAlign: TextAlign.center,
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search for a ward...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            _removeOverlay();
+                          },
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 ),
               ),
+            ),
+          ),
+          // Existing zoom indicator
+          Positioned(
+            top: 80,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.zoom_in,
+                    size: 16,
+                    color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _currentZoom >= _minZoomForLabels ? 'Ward names visible' : 'Zoom in to see ward names',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          // Existing zoom controls
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: Column(
+              children: [
+                FloatingActionButton(
+                  heroTag: 'zoomIn',
+                  onPressed: () {
+                    _mapController?.animateCamera(
+                      CameraUpdate.zoomIn(),
+                    );
+                  },
+                  child: const Icon(Icons.add),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'zoomOut',
+                  onPressed: () {
+                    _mapController?.animateCamera(
+                      CameraUpdate.zoomOut(),
+                    );
+                  },
+                  child: const Icon(Icons.remove),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'reset',
+                  onPressed: () {
+                    if (_mapBounds != null) {
+                      _mapController?.animateCamera(
+                        CameraUpdate.newLatLngBounds(_mapBounds!, 100),
+                      );
+                    }
+                  },
+                  child: const Icon(Icons.refresh),
+                ),
+              ],
             ),
           ),
         ],
@@ -846,15 +1235,47 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
-    bool inside = false;
-    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      if (((polygon[i].latitude > point.latitude) != (polygon[j].latitude > point.latitude)) &&
-          (point.longitude < (polygon[j].longitude - polygon[i].longitude) * (point.latitude - polygon[i].latitude) /
-              (polygon[j].latitude - polygon[i].latitude) + polygon[i].longitude)) {
-        inside = !inside;
+  void _updateMarkerVisibility() {
+    if (_mapController == null) return;
+
+    final Set<Marker> updatedMarkers = {};
+    for (var marker in _wardLabels) {
+      updatedMarkers.add(marker.copyWith(
+        visibleParam: _currentZoom >= _minZoomForLabels,
+      ));
+    }
+
+    setState(() {
+      _wardLabels.clear();
+      _wardLabels.addAll(updatedMarkers);
+    });
+  }
+
+  void _handleMapTap(LatLng point) {
+    // Find the ward that contains the tapped point
+    for (int i = 0; i < _polygons.length; i++) {
+      if (_isPointInPolygon(point, _polygons.elementAt(i).points)) {
+        _showWardDetails(i);
+        break;
       }
     }
-    return inside;
+  }
+
+  bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
+    bool isInside = false;
+    int j = polygon.length - 1;
+
+    for (int i = 0; i < polygon.length; i++) {
+      if ((polygon[i].latitude > point.latitude) != (polygon[j].latitude > point.latitude) &&
+          (point.longitude < (polygon[j].longitude - polygon[i].longitude) * 
+          (point.latitude - polygon[i].latitude) / 
+          (polygon[j].latitude - polygon[i].latitude) + 
+          polygon[i].longitude)) {
+        isInside = !isInside;
+      }
+      j = i;
+    }
+
+    return isInside;
   }
 }
