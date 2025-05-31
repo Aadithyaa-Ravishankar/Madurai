@@ -1,4 +1,7 @@
+// Reminder: complaint_form.dart requires intl, image_picker, geolocator, geocoding in pubspec.yaml
+// See complaint_form.dart for details
 import 'package:flutter/material.dart';
+import 'complaint_form.dart';
 
 class ComplaintsPage extends StatelessWidget {
   const ComplaintsPage({Key? key}) : super(key: key);
@@ -85,7 +88,13 @@ class _CategoryCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () {},
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => ComplaintFormPage(category: cat.title),
+            ),
+          );
+        },
         child: Container(
           decoration: BoxDecoration(
             border: Border.all(color: const Color(0xFFE5E7EB), width: 1.5),
