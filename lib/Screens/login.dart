@@ -27,7 +27,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(milliseconds: 500), () {
       setState(() => _showLogin = true);
     });
   }
@@ -100,7 +100,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                     width: 250,
                     height: 250,
                     child: Image.asset(
-                      'assets/images/channels4-profile-1.png',
+                      'assets/images/image-2.png',
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -109,7 +109,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Image.asset(
-                        'assets/images/image-2.png',
+                        'assets/images/image-1.png',
                         width: 35,
                         height: 40,
                         fit: BoxFit.cover,

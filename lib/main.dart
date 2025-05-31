@@ -13,7 +13,13 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'config/supabase_config.dart';
 import 'Screens/login.dart';
+import 'Screens/complaints.dart';
+import 'Screens/profile.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'widgets/bottom_toolbar.dart';
+import 'Screens/splash_screen.dart';
+import 'package:geolocator/geolocator.dart';
+import 'services/map_service.dart';
 
 class TextBox {
   final LatLng center;
@@ -25,11 +31,21 @@ class TextBox {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Supabase.initialize(
-    url: SupabaseConfig.supabaseUrl,
-    anonKey: SupabaseConfig.supabaseAnonKey,
-  );
-  runApp(const MyApp());
+  
+  try {
+    await SupabaseConfig.initialize();
+    runApp(const MyApp());
+  } catch (e) {
+    print('Error initializing Supabase: $e');
+    // You might want to show an error screen here
+    runApp(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: Text('Failed to initialize app: $e'),
+        ),
+      ),
+    ));
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -38,11 +54,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Madurai Corporation',
+      title: 'Madurai',
       theme: ThemeData(
         primarySwatch: Colors.red,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: const AuthWrapper(),
+      home: const SplashScreen(),
     );
   }
 }
@@ -74,7 +91,8 @@ class MapPage extends StatefulWidget {
   State<MapPage> createState() => _MapPageState();
 }
 
-class _MapPageState extends State<MapPage> {
+class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
+  final MapService _mapService = MapService();
   GoogleMapController? _mapController;
   Set<Polygon> _polygons = {};
   Set<Marker> _wardLabels = {};
@@ -149,155 +167,40 @@ class _MapPageState extends State<MapPage> {
   // Add a GlobalKey for the search bar
   final GlobalKey _searchBarKey = GlobalKey();
 
-  TextBox _findLargestTextBox(List<LatLng> wardPoints) {
-    if (wardPoints.isEmpty) return TextBox(LatLng(0, 0), 0, 0);
-
-    // Get the bounding box of the ward
-    double minLat = wardPoints.map((p) => p.latitude).reduce(min);
-    double maxLat = wardPoints.map((p) => p.latitude).reduce(max);
-    double minLng = wardPoints.map((p) => p.longitude).reduce(min);
-    double maxLng = wardPoints.map((p) => p.longitude).reduce(max);
-
-    // Convert to pixels (approximate)
-    const double pixelsPerDegree = 100000.0;
-    double maxWidth = 0;
-    double maxHeight = 0;
-    LatLng bestCenter = _calculateCentroid(wardPoints);
-
-    // Grid search for the largest box
-    const int gridSize = 20; // Increased grid size for better precision
-    double latStep = (maxLat - minLat) / gridSize;
-    double lngStep = (maxLng - minLng) / gridSize;
-
-    for (int i = 0; i <= gridSize; i++) {
-      for (int j = 0; j <= gridSize; j++) {
-        LatLng testCenter = LatLng(
-          minLat + i * latStep,
-          minLng + j * lngStep,
-        );
-
-        if (!_isPointInPolygon(testCenter, wardPoints)) continue;
-
-        // Find maximum width at this center
-        double width = 0;
-        double step = 0.0001;
-        for (double offset = 0; offset < 0.01; offset += step) {
-          LatLng rightPoint = LatLng(testCenter.latitude, testCenter.longitude + offset);
-          LatLng leftPoint = LatLng(testCenter.latitude, testCenter.longitude - offset);
-          
-          if (!_isPointInPolygon(rightPoint, wardPoints) || 
-              !_isPointInPolygon(leftPoint, wardPoints)) {
-            width = offset * 2;
-            break;
-          }
-        }
-
-        // Find maximum height at this center
-        double height = 0;
-        for (double offset = 0; offset < 0.01; offset += step) {
-          LatLng topPoint = LatLng(testCenter.latitude + offset, testCenter.longitude);
-          LatLng bottomPoint = LatLng(testCenter.latitude - offset, testCenter.longitude);
-          
-          if (!_isPointInPolygon(topPoint, wardPoints) || 
-              !_isPointInPolygon(bottomPoint, wardPoints)) {
-            height = offset * 2;
-            break;
-          }
-        }
-
-        // Calculate area of this box
-        double area = width * height;
-        double maxArea = maxWidth * maxHeight;
-
-        // Update if this box is larger
-        if (area > maxArea) {
-          maxWidth = width;
-          maxHeight = height;
-          bestCenter = testCenter;
-        }
-      }
-    }
-
-    // Convert to pixels
-    return TextBox(
-      bestCenter,
-      maxWidth * pixelsPerDegree,
-      maxHeight * pixelsPerDegree,
-    );
-  }
-
-  Future<BitmapDescriptor> _createCustomMarkerIcon(String text, double maxWidth, double maxHeight) async {
-    final pictureRecorder = ui.PictureRecorder();
-    final canvas = Canvas(pictureRecorder);
-    
-    // Create text painter with max width constraint
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: const TextStyle(
-          color: Colors.black,
-          fontSize: 20,
-          fontWeight: FontWeight.normal,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-      maxLines: 2,
-      ellipsis: '...',
-    );
-    
-    // Layout with max width constraint
-    textPainter.layout(maxWidth: maxWidth);
-    
-    // Draw text
-    textPainter.paint(
-      canvas,
-      Offset(0, 0),
-    );
-    
-    final picture = pictureRecorder.endRecording();
-    final image = await picture.toImage(textPainter.width.toInt(), textPainter.height.toInt());
-    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-    
-    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
-  }
-
-  bool _isLabelInWard(LatLng labelPosition, List<LatLng> wardPoints) {
-    // Convert text dimensions to approximate lat/lng offsets
-    // This is a rough approximation - you may need to adjust these values
-    const double pixelsPerDegree = 100000.0; // Approximate pixels per degree at zoom level 13
-    const double textWidth = 200.0; // Max width from _createCustomMarkerIcon
-    const double textHeight = 28.0; // Approximate height for font size 20
-    
-    double latOffset = textHeight / pixelsPerDegree;
-    double lngOffset = textWidth / pixelsPerDegree;
-    
-    // Check if all corners of the text box are within the ward
-    List<LatLng> textCorners = [
-      labelPosition, // Top-left
-      LatLng(labelPosition.latitude, labelPosition.longitude + lngOffset), // Top-right
-      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude), // Bottom-left
-      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude + lngOffset), // Bottom-right
-    ];
-    
-    // Check if all corners are within the ward
-    return textCorners.every((corner) => _isPointInPolygon(corner, wardPoints));
-  }
+  late AnimationController _animationController;
+  late Animation<double> _animation;
+  int _currentIndex = 1; // 0: Complaints, 1: Home, 2: Profile
 
   @override
   void initState() {
     super.initState();
-    _loadGeoJSON();
-    _loadCouncillorHtml();
     _searchController.addListener(_onSearchChanged);
     _setMapStyle();
+    
+    // Initialize animation controller
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _animation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    );
+
+    // Load data if not already loaded
+    if (!_mapService.isMapReady) {
+      _loadGeoJSON();
+      _loadCouncillorHtml();
+    }
   }
 
   @override
   void dispose() {
+    _animationController.dispose();
     _searchController.dispose();
     _removeOverlay();
     _httpClient.close();
-    _mapController?.dispose();
+    // Don't dispose the map controller here as it's managed by MapService
     super.dispose();
   }
 
@@ -457,10 +360,8 @@ class _MapPageState extends State<MapPage> {
       }
 
       setState(() {
-        _polygons.clear();
-        _polygons.addAll(loadedPolygons);
-        _wardLabels.clear();
-        _wardLabels.addAll(loadedLabels);
+        _mapService.setPolygons(loadedPolygons);
+        _mapService.setWardLabels(loadedLabels);
         _wardNames.clear();
         _wardNames.addAll(wardNames);
         _wardDescriptions.clear();
@@ -470,6 +371,24 @@ class _MapPageState extends State<MapPage> {
         _wardNumbers.clear();
         _wardNumbers.addAll(wardNumbers);
       });
+
+      // Wait for the map to be ready and rendered
+      if (_mapService.mapController != null) {
+        // First, ensure we're at the correct zoom level
+        await _mapService.mapController!.animateCamera(
+          CameraUpdate.newLatLngBounds(_mapBounds!, 50),
+          duration: const Duration(milliseconds: 500),
+        );
+
+        // Then wait for the map to be fully rendered
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+      
+      if (mounted) {
+        setState(() {
+          _mapService.setLoading(false);
+        });
+      }
 
       debugPrint("\nSuccessfully loaded ${loadedPolygons.length} polygons");
     } catch (e) {
@@ -766,15 +685,11 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _showWardDetails(int wardIndex) {
+    _removeOverlay();
     final wardName = _wardNames[wardIndex];
     final wardDescription = _wardDescriptions[wardIndex];
     final displayName = _displayNames[wardIndex];
     final wardNo = _wardNumbers[wardIndex];
-
-    debugPrint('Raw ward name: $wardName');
-    debugPrint('Display name: $displayName');
-    debugPrint('Ward number from GeoJSON: $wardNo');
-    debugPrint('Councillor data keys: ${_councillorData.keys}');
 
     Map<String, String>? councillorInfo = _councillorData[wardNo];
     String councillorName = councillorInfo?['name'] ?? 'No councillor details available';
@@ -789,6 +704,7 @@ class _MapPageState extends State<MapPage> {
 
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (BuildContext context) {
         return Dialog(
           shape: RoundedRectangleBorder(
@@ -804,9 +720,9 @@ class _MapPageState extends State<MapPage> {
               children: [
                 // Header
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.blue,
+                    color: Colors.red,
                     borderRadius: const BorderRadius.only(
                       topLeft: Radius.circular(16),
                       topRight: Radius.circular(16),
@@ -825,7 +741,7 @@ class _MapPageState extends State<MapPage> {
                           style: const TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: Colors.blue,
+                            color: Colors.red,
                           ),
                         ),
                       ),
@@ -846,7 +762,7 @@ class _MapPageState extends State<MapPage> {
                 // Content
                 Flexible(
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(16),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -855,50 +771,53 @@ class _MapPageState extends State<MapPage> {
                           if (wardData.description != null && wardData.description!.isNotEmpty) ...[
                             _buildSectionHeader('Description'),
                             Container(
-                              padding: const EdgeInsets.all(8),
+                              padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.grey[100],
-                                borderRadius: BorderRadius.circular(6),
+                                color: Colors.grey[50],
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey[200]!),
                               ),
                               child: Text(
                                 wardData.description!,
-                                style: const TextStyle(fontSize: 13),
+                                style: const TextStyle(fontSize: 14),
                               ),
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 16),
                           ],
                           _buildSectionHeader('Areas'),
                           _buildListSection(wardData.areas),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                           _buildSectionHeader('Facilities'),
                           _buildListSection(wardData.facilities),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                           Container(
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.blue[50],
-                              borderRadius: BorderRadius.circular(6),
+                              color: Colors.red[50],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red[100]!),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.people, color: Colors.blue, size: 16),
-                                const SizedBox(width: 6),
+                                Icon(Icons.people, color: Colors.red[700], size: 20),
+                                const SizedBox(width: 8),
                                 Text(
                                   'Population: ${wardData.population}',
-                                  style: const TextStyle(
-                                    fontSize: 13,
+                                  style: TextStyle(
+                                    fontSize: 14,
                                     fontWeight: FontWeight.w500,
+                                    color: Colors.red[700],
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 20),
                         ],
                         if (councillorName != 'No councillor details available') ...[
                           const Divider(height: 24),
                           _buildSectionHeader('Councillor Information'),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                           if (councillorPhoto.isNotEmpty)
                             Center(
                               child: Container(
@@ -906,7 +825,7 @@ class _MapPageState extends State<MapPage> {
                                 width: 180,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.blue, width: 2),
+                                  border: Border.all(color: Colors.red, width: 2),
                                 ),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(18),
@@ -927,7 +846,7 @@ class _MapPageState extends State<MapPage> {
                                                         loadingProgress.expectedTotalBytes!
                                                     : null,
                                                 strokeWidth: 2,
-                                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
                                               ),
                                             ),
                                           );
@@ -944,7 +863,7 @@ class _MapPageState extends State<MapPage> {
                                 ),
                               ),
                             ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 16),
                           _buildInfoCard([
                             _buildInfoRow(Icons.person, 'Name', councillorName),
                             if (councillorParty.isNotEmpty)
@@ -964,11 +883,11 @@ class _MapPageState extends State<MapPage> {
                             child: Column(
                               children: [
                                 Icon(Icons.info_outline, size: 36, color: Colors.grey[400]),
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 8),
                                 Text(
                                   'No councillor details available',
                                   style: TextStyle(
-                                    fontSize: 13,
+                                    fontSize: 14,
                                     color: Colors.grey[600],
                                   ),
                                 ),
@@ -982,9 +901,9 @@ class _MapPageState extends State<MapPage> {
                 ),
                 // Footer
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.grey[100],
+                    color: Colors.grey[50],
                     borderRadius: const BorderRadius.only(
                       bottomLeft: Radius.circular(16),
                       bottomRight: Radius.circular(16),
@@ -996,7 +915,15 @@ class _MapPageState extends State<MapPage> {
                       TextButton(
                         onPressed: () {
                           Navigator.of(context).pop();
+                          setState(() {
+                            _isSearching = false;
+                            _searchSuggestions = [];
+                          });
                         },
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        ),
                         child: const Text(
                           'Close',
                           style: TextStyle(
@@ -1018,13 +945,13 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         title,
         style: const TextStyle(
-          fontSize: 14,
+          fontSize: 16,
           fontWeight: FontWeight.bold,
-          color: Colors.blue,
+          color: Colors.red,
         ),
       ),
     );
@@ -1032,23 +959,25 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildListSection(List<dynamic> items) {
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(6),
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: items.map((item) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('• ', style: TextStyle(fontSize: 13)),
+              Icon(Icons.circle, size: 8, color: Colors.red[700]),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   item.toString(),
-                  style: const TextStyle(fontSize: 13),
+                  style: const TextStyle(fontSize: 14),
                 ),
               ),
             ],
@@ -1060,11 +989,11 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildInfoCard(List<Widget> children) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
+        border: Border.all(color: Colors.grey[200]!),
         boxShadow: [
           BoxShadow(
             color: Colors.grey.withOpacity(0.1),
@@ -1082,12 +1011,12 @@ class _MapPageState extends State<MapPage> {
 
   Widget _buildInfoRow(IconData icon, String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: Colors.blue),
-          const SizedBox(width: 6),
+          Icon(icon, size: 18, color: Colors.red[700]),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1099,11 +1028,11 @@ class _MapPageState extends State<MapPage> {
                     color: Colors.grey[600],
                   ),
                 ),
-                const SizedBox(height: 1),
+                const SizedBox(height: 2),
                 Text(
                   value,
                   style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -1128,8 +1057,10 @@ class _MapPageState extends State<MapPage> {
 
     // Filter ward names based on search query
     final suggestions = _displayNames.where((name) {
+      final wardIndex = _displayNames.indexOf(name);
+      final wardNo = _wardNumbers[wardIndex];
       return name.toLowerCase().contains(query) ||
-          _wardNumbers[_displayNames.indexOf(name)].toLowerCase().contains(query);
+          wardNo.toLowerCase().contains(query);
     }).toList();
 
     setState(() {
@@ -1154,7 +1085,7 @@ class _MapPageState extends State<MapPage> {
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         top: searchBarPosition.dy + searchBarHeight + 4,
-        left: 16,
+        left: 20,
         right: 16,
         child: Material(
           elevation: 4,
@@ -1166,6 +1097,13 @@ class _MapPageState extends State<MapPage> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1180,6 +1118,10 @@ class _MapPageState extends State<MapPage> {
                     _searchController.text = wardName;
                     _zoomToWard(wardIndex);
                     _removeOverlay();
+                    setState(() {
+                      _isSearching = false;
+                      _searchSuggestions = [];
+                    });
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1238,9 +1180,9 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _zoomToWard(int wardIndex) {
-    if (_mapController == null || wardIndex < 0 || wardIndex >= _polygons.length) return;
+    if (_mapService.mapController == null || wardIndex < 0 || wardIndex >= _mapService.polygons.length) return;
 
-    final polygon = _polygons.elementAt(wardIndex);
+    final polygon = _mapService.polygons.elementAt(wardIndex);
     final points = polygon.points;
 
     // Calculate bounds for the ward
@@ -1261,36 +1203,47 @@ class _MapPageState extends State<MapPage> {
       northeast: LatLng(maxLat, maxLng),
     );
 
-    _mapController!.animateCamera(
+    _mapService.mapController?.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 50),
       duration: const Duration(milliseconds: 500),
     );
   }
 
   void _zoomIn() {
-    _mapController?.animateCamera(
+    _mapService.mapController?.animateCamera(
       CameraUpdate.zoomIn(),
       duration: const Duration(milliseconds: 300),
     );
   }
 
   void _zoomOut() {
-    _mapController?.animateCamera(
+    _mapService.mapController?.animateCamera(
       CameraUpdate.zoomOut(),
       duration: const Duration(milliseconds: 300),
     );
   }
 
   void _resetView() {
-    if (_mapBounds != null) {
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngBounds(_mapBounds!, 100),
+    if (_mapService.mapBounds != null) {
+      _mapService.mapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(_mapService.mapBounds!, 50),
+        duration: const Duration(milliseconds: 500),
+      );
+    } else {
+      // If bounds are not set, reset to initial position
+      _mapService.mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: _maduraiCenter,
+            zoom: 12.0,
+          ),
+        ),
         duration: const Duration(milliseconds: 500),
       );
     }
   }
 
-  void _setMapStyle() async {
+  Future<void> _setMapStyle() async {
     String style = '''
       [
         {
@@ -1304,8 +1257,8 @@ class _MapPageState extends State<MapPage> {
         }
       ]
     ''';
-    if (_mapController != null) {
-      await _mapController!.setMapStyle(style);
+    if (_mapService.mapController != null) {
+      await _mapService.mapController!.setMapStyle(style);
     }
   }
 
@@ -1314,49 +1267,110 @@ class _MapPageState extends State<MapPage> {
     return Scaffold(
       body: Stack(
         children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: _maduraiCenter,
-              zoom: 12.0,
-            ),
-            onMapCreated: (GoogleMapController controller) {
-              _mapController = controller;
-              _loadGeoJSON();
-              _setMapStyle();
-            },
-            onCameraMove: (CameraPosition position) {
-              _currentZoom = position.zoom;
-              _updateMarkerVisibility();
-            },
-            polygons: _polygons,
-            markers: _wardLabels,
-            onTap: (_) {
-              _removeOverlay();
+          GestureDetector(
+            onTap: () {
+              FocusScope.of(context).unfocus();
               setState(() {
                 _isSearching = false;
+                _searchSuggestions = [];
               });
+              _removeOverlay();
             },
-            myLocationEnabled: true,
-            myLocationButtonEnabled: true,
-            zoomControlsEnabled: false,
-            mapToolbarEnabled: false,
-            mapType: MapType.normal,
-            compassEnabled: true,
-            tiltGesturesEnabled: true,
-            rotateGesturesEnabled: true,
-            scrollGesturesEnabled: true,
-            zoomGesturesEnabled: true,
-            buildingsEnabled: false,
-            trafficEnabled: false,
-            indoorViewEnabled: false,
-            minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
+            child: GoogleMap(
+              initialCameraPosition: CameraPosition(
+                target: _maduraiCenter,
+                zoom: 12.0,
+              ),
+              onMapCreated: (GoogleMapController controller) async {
+                _mapService.setMapController(controller);
+                await _setMapStyle();
+                if (!_mapService.isMapReady) {
+                  _loadGeoJSON();
+                  _loadCouncillorHtml();
+                }
+              },
+              onCameraMove: (CameraPosition position) {
+                _mapService.setCurrentZoom(position.zoom);
+                _updateMarkerVisibility();
+              },
+              onCameraIdle: () {
+                // Ensure the map is fully rendered before hiding the loading indicator
+                if (_mapService.isLoading && _mapService.polygons.isNotEmpty) {
+                  setState(() {
+                    _mapService.setLoading(false);
+                  });
+                }
+              },
+              polygons: _mapService.polygons,
+              markers: _mapService.wardLabels,
+              onTap: (LatLng point) {
+                _removeOverlay();
+                setState(() {
+                  _isSearching = false;
+                });
+                _handleMapTap(point);
+              },
+              myLocationEnabled: true,
+              myLocationButtonEnabled: true,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+              mapType: MapType.normal,
+              compassEnabled: true,
+              tiltGesturesEnabled: true,
+              rotateGesturesEnabled: true,
+              scrollGesturesEnabled: true,
+              zoomGesturesEnabled: true,
+              buildingsEnabled: false,
+              trafficEnabled: false,
+              indoorViewEnabled: false,
+              minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
+            ),
           ),
+          if (_mapService.isLoading)
+            Container(
+              color: Colors.black.withOpacity(0.3),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Text(
+                        'Loading ward boundaries...',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: 16,
+            top: 55,
+            left: 20,
             right: 16,
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
+                // Logout button on the left
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -1374,11 +1388,14 @@ class _MapPageState extends State<MapPage> {
                     onPressed: _signOut,
                     tooltip: 'Logout',
                     color: Colors.red,
+                    padding: EdgeInsets.zero,
                   ),
                 ),
                 const SizedBox(width: 8),
+                // Search bar on the right
                 Expanded(
                   child: Container(
+                    key: _searchBarKey,
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
@@ -1391,15 +1408,27 @@ class _MapPageState extends State<MapPage> {
                       ],
                     ),
                     child: TextField(
-                      key: _searchBarKey,
                       controller: _searchController,
                       decoration: InputDecoration(
-                        hintText: 'Search for a ward...',
-                        prefixIcon: const Icon(Icons.search),
+                        hintText: 'Search location...',
+                        prefixIcon: Icon(Icons.search, color: Colors.red),
                         border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                        contentPadding: EdgeInsets.only(right: 16, top: 14, bottom: 14),
                       ),
                       onSubmitted: _searchLocation,
+                      onTap: () {
+                        if (_searchController.text.isNotEmpty) {
+                          _onSearchChanged();
+                        }
+                      },
+                      onEditingComplete: () {
+                        FocusScope.of(context).unfocus();
+                        setState(() {
+                          _isSearching = false;
+                          _searchSuggestions = [];
+                        });
+                        _removeOverlay();
+                      },
                     ),
                   ),
                 ),
@@ -1408,7 +1437,7 @@ class _MapPageState extends State<MapPage> {
           ),
           // Zoom indicator with controls
           Positioned(
-            top: 104,
+            top: 114,
             right: 16,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -1432,14 +1461,14 @@ class _MapPageState extends State<MapPage> {
                       Icon(
                         Icons.zoom_in,
                         size: 16,
-                        color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                        color: _mapService.currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        _currentZoom >= _minZoomForLabels ? 'Ward names visible' : 'Zoom in to see ward names',
+                        _mapService.currentZoom >= _minZoomForLabels ? 'Ward names visible' : 'Zoom in to see ward names',
                         style: TextStyle(
                           fontSize: 12,
-                          color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                          color: _mapService.currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
                         ),
                       ),
                     ],
@@ -1512,31 +1541,40 @@ class _MapPageState extends State<MapPage> {
               ],
             ),
           ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: const BottomToolbar(currentIndex: 1),
+            ),
+          ),
         ],
       ),
     );
   }
 
   void _updateMarkerVisibility() {
-    if (_mapController == null) return;
+    if (_mapService.mapController == null) return;
 
     final Set<Marker> updatedMarkers = {};
-    for (var marker in _wardLabels) {
+    for (var marker in _mapService.wardLabels) {
       updatedMarkers.add(marker.copyWith(
-        visibleParam: _currentZoom >= _minZoomForLabels,
+        visibleParam: _mapService.currentZoom >= _minZoomForLabels,
       ));
     }
 
     setState(() {
-      _wardLabels.clear();
-      _wardLabels.addAll(updatedMarkers);
+      _mapService.setWardLabels(updatedMarkers);
     });
   }
 
   void _handleMapTap(LatLng point) {
+    _removeOverlay();
     // Find the ward that contains the tapped point
-    for (int i = 0; i < _polygons.length; i++) {
-      if (_isPointInPolygon(point, _polygons.elementAt(i).points)) {
+    for (int i = 0; i < _mapService.polygons.length; i++) {
+      if (_isPointInPolygon(point, _mapService.polygons.elementAt(i).points)) {
         _showWardDetails(i);
         break;
       }
@@ -1584,5 +1622,139 @@ class _MapPageState extends State<MapPage> {
     } catch (e) {
       print('Error searching location: $e');
     }
+  }
+
+  TextBox _findLargestTextBox(List<LatLng> wardPoints) {
+    if (wardPoints.isEmpty) return TextBox(LatLng(0, 0), 0, 0);
+
+    // Get the bounding box of the ward
+    double minLat = wardPoints.map((p) => p.latitude).reduce(min);
+    double maxLat = wardPoints.map((p) => p.latitude).reduce(max);
+    double minLng = wardPoints.map((p) => p.longitude).reduce(min);
+    double maxLng = wardPoints.map((p) => p.longitude).reduce(max);
+
+    // Convert to pixels (approximate)
+    const double pixelsPerDegree = 100000.0;
+    double maxWidth = 0;
+    double maxHeight = 0;
+    LatLng bestCenter = _calculateCentroid(wardPoints);
+
+    // Grid search for the largest box
+    const int gridSize = 20; // Increased grid size for better precision
+    double latStep = (maxLat - minLat) / gridSize;
+    double lngStep = (maxLng - minLng) / gridSize;
+
+    for (int i = 0; i <= gridSize; i++) {
+      for (int j = 0; j <= gridSize; j++) {
+        LatLng testCenter = LatLng(
+          minLat + i * latStep,
+          minLng + j * lngStep,
+        );
+
+        if (!_isPointInPolygon(testCenter, wardPoints)) continue;
+
+        // Find maximum width at this center
+        double width = 0;
+        double step = 0.0001;
+        for (double offset = 0; offset < 0.01; offset += step) {
+          LatLng rightPoint = LatLng(testCenter.latitude, testCenter.longitude + offset);
+          LatLng leftPoint = LatLng(testCenter.latitude, testCenter.longitude - offset);
+          
+          if (!_isPointInPolygon(rightPoint, wardPoints) || 
+              !_isPointInPolygon(leftPoint, wardPoints)) {
+            width = offset * 2;
+            break;
+          }
+        }
+
+        // Find maximum height at this center
+        double height = 0;
+        for (double offset = 0; offset < 0.01; offset += step) {
+          LatLng topPoint = LatLng(testCenter.latitude + offset, testCenter.longitude);
+          LatLng bottomPoint = LatLng(testCenter.latitude - offset, testCenter.longitude);
+          
+          if (!_isPointInPolygon(topPoint, wardPoints) || 
+              !_isPointInPolygon(bottomPoint, wardPoints)) {
+            height = offset * 2;
+            break;
+          }
+        }
+
+        // Calculate area of this box
+        double area = width * height;
+        double maxArea = maxWidth * maxHeight;
+
+        // Update if this box is larger
+        if (area > maxArea) {
+          maxWidth = width;
+          maxHeight = height;
+          bestCenter = testCenter;
+        }
+      }
+    }
+
+    // Convert to pixels
+    return TextBox(
+      bestCenter,
+      maxWidth * pixelsPerDegree,
+      maxHeight * pixelsPerDegree,
+    );
+  }
+
+  Future<BitmapDescriptor> _createCustomMarkerIcon(String text, double maxWidth, double maxHeight) async {
+    final pictureRecorder = ui.PictureRecorder();
+    final canvas = Canvas(pictureRecorder);
+    
+    // Create text painter with max width constraint
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          color: Colors.black,
+          fontSize: 20,
+          fontWeight: FontWeight.normal,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '...',
+    );
+    
+    // Layout with max width constraint
+    textPainter.layout(maxWidth: maxWidth);
+    
+    // Draw text
+    textPainter.paint(
+      canvas,
+      Offset(0, 0),
+    );
+    
+    final picture = pictureRecorder.endRecording();
+    final image = await picture.toImage(textPainter.width.toInt(), textPainter.height.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
+  }
+
+  bool _isLabelInWard(LatLng labelPosition, List<LatLng> wardPoints) {
+    // Convert text dimensions to approximate lat/lng offsets
+    // This is a rough approximation - you may need to adjust these values
+    const double pixelsPerDegree = 100000.0; // Approximate pixels per degree at zoom level 13
+    const double textWidth = 200.0; // Max width from _createCustomMarkerIcon
+    const double textHeight = 28.0; // Approximate height for font size 20
+    
+    double latOffset = textHeight / pixelsPerDegree;
+    double lngOffset = textWidth / pixelsPerDegree;
+    
+    // Check if all corners of the text box are within the ward
+    List<LatLng> textCorners = [
+      labelPosition, // Top-left
+      LatLng(labelPosition.latitude, labelPosition.longitude + lngOffset), // Top-right
+      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude), // Bottom-left
+      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude + lngOffset), // Bottom-right
+    ];
+    
+    // Check if all corners are within the ward
+    return textCorners.every((corner) => _isPointInPolygon(corner, wardPoints));
   }
 }
