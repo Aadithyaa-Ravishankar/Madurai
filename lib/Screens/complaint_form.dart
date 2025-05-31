@@ -15,6 +15,29 @@ import '../config/supabase_config.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
+
+class LatLng {
+  final double lat;
+  final double lng;
+  LatLng(this.lat, this.lng);
+}
+
+Future<LatLng?> geocodeAddressWithGoogle(String address) async {
+  final apiKey = 'AIzaSyAvibCYQuoqU1BNqfWV0QkTXvT39-Wz954';
+  final url = Uri.parse(
+    'https://maps.googleapis.com/maps/api/geocode/json?address=${Uri.encodeComponent(address)}&key=$apiKey'
+  );
+  final response = await http.get(url);
+  if (response.statusCode == 200) {
+    final data = json.decode(response.body);
+    if (data['status'] == 'OK' && data['results'].isNotEmpty) {
+      final location = data['results'][0]['geometry']['location'];
+      return LatLng(location['lat'], location['lng']);
+    }
+  }
+  return null;
+}
 
 class ComplaintFormPage extends StatefulWidget {
   final String category;
@@ -136,15 +159,20 @@ class _ComplaintFormPageState extends State<ComplaintFormPage> {
   }
 
   Future<void> _onManualAddressChanged(String value) async {
-    // TODO: Use geocoding API to get lat/lng from address
-    // For demo, use hardcoded Madurai center
-    double lat = 9.9252;
-    double lng = 78.1198;
-    setState(() {
-      _currentLat = lat;
-      _currentLng = lng;
-      _detectedWardNo = _detectWardNo(lat, lng);
-    });
+    final latLng = await geocodeAddressWithGoogle(value);
+    if (latLng != null) {
+      setState(() {
+        _currentLat = latLng.lat;
+        _currentLng = latLng.lng;
+        _detectedWardNo = _detectWardNo(latLng.lat, latLng.lng);
+      });
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not geocode address.')),
+        );
+      }
+    }
   }
 
   Future<void> _pickImage() async {
