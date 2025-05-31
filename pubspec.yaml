@@ -1,5 +1,5 @@
-name: madurai_flutter_app
-description: "A new Flutter project."
+name: madurai
+description: A new Flutter project.
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -35,6 +35,10 @@ dependencies:
   http: ^1.2.0
   html: ^0.15.4
   google_maps_flutter: ^2.5.3
+  supabase_flutter: ^2.3.4
+  geolocator: ^10.1.0
+  flutter_polyline_points: ^2.0.0
+  flutter_dotenv: ^5.1.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -61,10 +65,9 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
-    - assets/map.html
+    - assets/images/image-1.png
     - assets/madurai_wards.geojson
     - assets/councillor.html
-
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -83,11 +86,9 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   # fonts:
-  #   - family: Schyler
+  #   - family: PottaOne
   #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
+  #       - asset: assets/fonts/PottaOne-Regular.ttf
   #   - family: Trajan Pro
   #     fonts:
   #       - asset: fonts/TrajanPro.ttf

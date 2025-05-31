@@ -11,24 +11,58 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import 'dart:ui' as ui;
 import 'dart:typed_data';
+import 'config/supabase_config.dart';
+import 'Screens/login.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
-  runApp(const MyMapApp());
+class TextBox {
+  final LatLng center;
+  final double width;
+  final double height;
+
+  const TextBox(this.center, this.width, this.height);
 }
 
-class MyMapApp extends StatelessWidget {
-  const MyMapApp({super.key});
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: SupabaseConfig.supabaseUrl,
+    anonKey: SupabaseConfig.supabaseAnonKey,
+  );
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Madurai Ward Map',
-      home: const MapPage(),
-      debugShowCheckedModeBanner: false,
+      title: 'Madurai Corporation',
       theme: ThemeData(
-        primarySwatch: Colors.blue,
-        visualDensity: VisualDensity.adaptivePlatformDensity,
+        primarySwatch: Colors.red,
       ),
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: SupabaseConfig.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        if (snapshot.hasData) {
+          final session = snapshot.data!.session;
+          if (session != null) {
+            return const MapPage();
+          }
+        }
+        return const CombinedLoginPage();
+      },
     );
   }
 }
@@ -115,24 +149,106 @@ class _MapPageState extends State<MapPage> {
   // Add a GlobalKey for the search bar
   final GlobalKey _searchBarKey = GlobalKey();
 
-  Future<BitmapDescriptor> _createCustomMarkerIcon(String text) async {
+  TextBox _findLargestTextBox(List<LatLng> wardPoints) {
+    if (wardPoints.isEmpty) return TextBox(LatLng(0, 0), 0, 0);
+
+    // Get the bounding box of the ward
+    double minLat = wardPoints.map((p) => p.latitude).reduce(min);
+    double maxLat = wardPoints.map((p) => p.latitude).reduce(max);
+    double minLng = wardPoints.map((p) => p.longitude).reduce(min);
+    double maxLng = wardPoints.map((p) => p.longitude).reduce(max);
+
+    // Convert to pixels (approximate)
+    const double pixelsPerDegree = 100000.0;
+    double maxWidth = 0;
+    double maxHeight = 0;
+    LatLng bestCenter = _calculateCentroid(wardPoints);
+
+    // Grid search for the largest box
+    const int gridSize = 20; // Increased grid size for better precision
+    double latStep = (maxLat - minLat) / gridSize;
+    double lngStep = (maxLng - minLng) / gridSize;
+
+    for (int i = 0; i <= gridSize; i++) {
+      for (int j = 0; j <= gridSize; j++) {
+        LatLng testCenter = LatLng(
+          minLat + i * latStep,
+          minLng + j * lngStep,
+        );
+
+        if (!_isPointInPolygon(testCenter, wardPoints)) continue;
+
+        // Find maximum width at this center
+        double width = 0;
+        double step = 0.0001;
+        for (double offset = 0; offset < 0.01; offset += step) {
+          LatLng rightPoint = LatLng(testCenter.latitude, testCenter.longitude + offset);
+          LatLng leftPoint = LatLng(testCenter.latitude, testCenter.longitude - offset);
+          
+          if (!_isPointInPolygon(rightPoint, wardPoints) || 
+              !_isPointInPolygon(leftPoint, wardPoints)) {
+            width = offset * 2;
+            break;
+          }
+        }
+
+        // Find maximum height at this center
+        double height = 0;
+        for (double offset = 0; offset < 0.01; offset += step) {
+          LatLng topPoint = LatLng(testCenter.latitude + offset, testCenter.longitude);
+          LatLng bottomPoint = LatLng(testCenter.latitude - offset, testCenter.longitude);
+          
+          if (!_isPointInPolygon(topPoint, wardPoints) || 
+              !_isPointInPolygon(bottomPoint, wardPoints)) {
+            height = offset * 2;
+            break;
+          }
+        }
+
+        // Calculate area of this box
+        double area = width * height;
+        double maxArea = maxWidth * maxHeight;
+
+        // Update if this box is larger
+        if (area > maxArea) {
+          maxWidth = width;
+          maxHeight = height;
+          bestCenter = testCenter;
+        }
+      }
+    }
+
+    // Convert to pixels
+    return TextBox(
+      bestCenter,
+      maxWidth * pixelsPerDegree,
+      maxHeight * pixelsPerDegree,
+    );
+  }
+
+  Future<BitmapDescriptor> _createCustomMarkerIcon(String text, double maxWidth, double maxHeight) async {
     final pictureRecorder = ui.PictureRecorder();
     final canvas = Canvas(pictureRecorder);
     
-    // Draw text
+    // Create text painter with max width constraint
     final textPainter = TextPainter(
       text: TextSpan(
         text: text,
         style: const TextStyle(
           color: Colors.black,
           fontSize: 20,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.normal,
         ),
       ),
       textDirection: TextDirection.ltr,
+      maxLines: 2,
+      ellipsis: '...',
     );
     
-    textPainter.layout();
+    // Layout with max width constraint
+    textPainter.layout(maxWidth: maxWidth);
+    
+    // Draw text
     textPainter.paint(
       canvas,
       Offset(0, 0),
@@ -145,12 +261,35 @@ class _MapPageState extends State<MapPage> {
     return BitmapDescriptor.fromBytes(bytes!.buffer.asUint8List());
   }
 
+  bool _isLabelInWard(LatLng labelPosition, List<LatLng> wardPoints) {
+    // Convert text dimensions to approximate lat/lng offsets
+    // This is a rough approximation - you may need to adjust these values
+    const double pixelsPerDegree = 100000.0; // Approximate pixels per degree at zoom level 13
+    const double textWidth = 200.0; // Max width from _createCustomMarkerIcon
+    const double textHeight = 28.0; // Approximate height for font size 20
+    
+    double latOffset = textHeight / pixelsPerDegree;
+    double lngOffset = textWidth / pixelsPerDegree;
+    
+    // Check if all corners of the text box are within the ward
+    List<LatLng> textCorners = [
+      labelPosition, // Top-left
+      LatLng(labelPosition.latitude, labelPosition.longitude + lngOffset), // Top-right
+      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude), // Bottom-left
+      LatLng(labelPosition.latitude - latOffset, labelPosition.longitude + lngOffset), // Bottom-right
+    ];
+    
+    // Check if all corners are within the ward
+    return textCorners.every((corner) => _isPointInPolygon(corner, wardPoints));
+  }
+
   @override
   void initState() {
     super.initState();
     _loadGeoJSON();
     _loadCouncillorHtml();
     _searchController.addListener(_onSearchChanged);
+    _setMapStyle();
   }
 
   @override
@@ -296,15 +435,15 @@ class _MapPageState extends State<MapPage> {
           loadedPolygons.add(polygon);
 
           // Calculate position and add label
-          final labelPosition = _findLabelPosition(wardPoints[i]);
-          final customIcon = await _createCustomMarkerIcon(displayNames[i]);
+          final textBox = _findLargestTextBox(wardPoints[i]);
+          final customIcon = await _createCustomMarkerIcon(displayNames[i], textBox.width, textBox.height);
           final label = Marker(
             markerId: MarkerId('label_$i'),
-            position: labelPosition,
+            position: textBox.center,
             infoWindow: InfoWindow(
               title: displayNames[i],
             ),
-            visible: _currentZoom >= _minZoomForLabels, // Set initial visibility
+            visible: _currentZoom >= _minZoomForLabels,
             icon: customIcon,
             anchor: const Offset(0.5, 0.5),
             onTap: () {
@@ -331,17 +470,6 @@ class _MapPageState extends State<MapPage> {
         _wardNumbers.clear();
         _wardNumbers.addAll(wardNumbers);
       });
-
-      // Add a small delay before adjusting camera bounds
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (_mapBounds != null && _mapController != null) {
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLngBounds(
-            _mapBounds!,
-            100,
-          ),
-        );
-      }
 
       debugPrint("\nSuccessfully loaded ${loadedPolygons.length} polygons");
     } catch (e) {
@@ -606,6 +734,35 @@ class _MapPageState extends State<MapPage> {
     double dy = y - yy;
 
     return sqrt(dx * dx + dy * dy);
+  }
+
+  double _calculateMaxTextWidth(LatLng center, List<LatLng> wardPoints) {
+    // Convert text dimensions to approximate lat/lng offsets
+    const double pixelsPerDegree = 100000.0; // Approximate pixels per degree at zoom level 13
+    
+    // Find the maximum width that fits within the ward
+    double maxWidth = 0;
+    double step = 0.0001; // Small step in degrees
+    
+    // Check width in both directions
+    for (double offset = 0; offset < 0.01; offset += step) {
+      // Check right side
+      LatLng rightPoint = LatLng(center.latitude, center.longitude + offset);
+      if (!_isPointInPolygon(rightPoint, wardPoints)) {
+        maxWidth = offset;
+        break;
+      }
+      
+      // Check left side
+      LatLng leftPoint = LatLng(center.latitude, center.longitude - offset);
+      if (!_isPointInPolygon(leftPoint, wardPoints)) {
+        maxWidth = offset;
+        break;
+      }
+    }
+    
+    // Convert from degrees to pixels
+    return maxWidth * pixelsPerDegree;
   }
 
   void _showWardDetails(int wardIndex) {
@@ -996,19 +1153,19 @@ class _MapPageState extends State<MapPage> {
 
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
-        top: searchBarPosition.dy + searchBarHeight + 4, // Position below search bar with 4px gap
+        top: searchBarPosition.dy + searchBarHeight + 4,
         left: 16,
         right: 16,
         child: Material(
           elevation: 4,
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(8),
           child: Container(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.of(context).size.height * 0.3,
             ),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(8),
             ),
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1018,14 +1175,52 @@ class _MapPageState extends State<MapPage> {
                 final wardName = _searchSuggestions[index];
                 final wardIndex = _displayNames.indexOf(wardName);
                 final wardNo = _wardNumbers[wardIndex];
-                return ListTile(
-                  title: Text(wardName),
-                  subtitle: Text('Ward $wardNo'),
+                return InkWell(
                   onTap: () {
                     _searchController.text = wardName;
                     _zoomToWard(wardIndex);
                     _removeOverlay();
                   },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Colors.grey[200]!,
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.red[50],
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Ward $wardNo',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.red[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            wardName,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               },
             ),
@@ -1068,26 +1263,66 @@ class _MapPageState extends State<MapPage> {
 
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 50),
+      duration: const Duration(milliseconds: 500),
     );
+  }
+
+  void _zoomIn() {
+    _mapController?.animateCamera(
+      CameraUpdate.zoomIn(),
+      duration: const Duration(milliseconds: 300),
+    );
+  }
+
+  void _zoomOut() {
+    _mapController?.animateCamera(
+      CameraUpdate.zoomOut(),
+      duration: const Duration(milliseconds: 300),
+    );
+  }
+
+  void _resetView() {
+    if (_mapBounds != null) {
+      _mapController?.animateCamera(
+        CameraUpdate.newLatLngBounds(_mapBounds!, 100),
+        duration: const Duration(milliseconds: 500),
+      );
+    }
+  }
+
+  void _setMapStyle() async {
+    String style = '''
+      [
+        {
+          "featureType": "all",
+          "elementType": "labels",
+          "stylers": [
+            {
+              "visibility": "off"
+            }
+          ]
+        }
+      ]
+    ''';
+    if (_mapController != null) {
+      await _mapController!.setMapStyle(style);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Madurai Ward Map'),
-        backgroundColor: Colors.blue,
-      ),
       body: Stack(
         children: [
           GoogleMap(
             initialCameraPosition: CameraPosition(
               target: _maduraiCenter,
-              zoom: 13.0,
+              zoom: 12.0,
             ),
             onMapCreated: (GoogleMapController controller) {
               _mapController = controller;
               _loadGeoJSON();
+              _setMapStyle();
             },
             onCameraMove: (CameraPosition position) {
               _currentZoom = position.zoom;
@@ -1114,118 +1349,165 @@ class _MapPageState extends State<MapPage> {
             buildingsEnabled: false,
             trafficEnabled: false,
             indoorViewEnabled: false,
+            minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
           ),
-          // Search bar with key
           Positioned(
-            top: 16,
+            top: MediaQuery.of(context).padding.top + 16,
             left: 16,
             right: 16,
-            child: Container(
-              key: _searchBarKey,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(24),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+            child: Row(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search for a ward...',
-                  prefixIcon: const Icon(Icons.search),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            _removeOverlay();
-                          },
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  child: IconButton(
+                    icon: const Icon(Icons.logout),
+                    onPressed: _signOut,
+                    tooltip: 'Logout',
+                    color: Colors.red,
+                  ),
                 ),
-              ),
-            ),
-          ),
-          // Existing zoom indicator
-          Positioned(
-            top: 80,
-            right: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.zoom_in,
-                    size: 16,
-                    color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    _currentZoom >= _minZoomForLabels ? 'Ward names visible' : 'Zoom in to see ward names',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: TextField(
+                      key: _searchBarKey,
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search for a ward...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      ),
+                      onSubmitted: _searchLocation,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          // Existing zoom controls
+          // Zoom indicator with controls
           Positioned(
+            top: 104,
             right: 16,
-            bottom: 16,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                FloatingActionButton(
-                  heroTag: 'zoomIn',
-                  onPressed: () {
-                    _mapController?.animateCamera(
-                      CameraUpdate.zoomIn(),
-                    );
-                  },
-                  child: const Icon(Icons.add),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.zoom_in,
+                        size: 16,
+                        color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _currentZoom >= _minZoomForLabels ? 'Ward names visible' : 'Zoom in to see ward names',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _currentZoom >= _minZoomForLabels ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'zoomOut',
-                  onPressed: () {
-                    _mapController?.animateCamera(
-                      CameraUpdate.zoomOut(),
-                    );
-                  },
-                  child: const Icon(Icons.remove),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'reset',
-                  onPressed: () {
-                    if (_mapBounds != null) {
-                      _mapController?.animateCamera(
-                        CameraUpdate.newLatLngBounds(_mapBounds!, 100),
-                      );
-                    }
-                  },
-                  child: const Icon(Icons.refresh),
+                Column(
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.add),
+                        onPressed: _zoomIn,
+                        tooltip: 'Zoom In',
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.remove),
+                        onPressed: _zoomOut,
+                        tooltip: 'Zoom Out',
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.refresh),
+                        onPressed: _resetView,
+                        tooltip: 'Reset View',
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1277,5 +1559,30 @@ class _MapPageState extends State<MapPage> {
     }
 
     return isInside;
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await SupabaseConfig.client.auth.signOut();
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const CombinedLoginPage()),
+        );
+      }
+    } catch (e) {
+      print('Error signing out: $e');
+    }
+  }
+
+  Future<void> _searchLocation(String query) async {
+    if (query.isEmpty) return;
+
+    try {
+      // You can implement location search logic here
+      // For now, we'll just print the query
+      print('Searching for: $query');
+    } catch (e) {
+      print('Error searching location: $e');
+    }
   }
 }
