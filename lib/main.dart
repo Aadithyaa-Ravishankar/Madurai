@@ -742,6 +742,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     debugPrint('[_MapPageState] _showWardDetails called for ward index $wardIndex');
     if (!mounted) return;
     _removeOverlay();
+    
     final wardName = _wardNames[wardIndex];
     final wardDescription = _wardDescriptions[wardIndex];
     final displayName = _displayNames[wardIndex];
@@ -752,10 +753,11 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     // Get the current locale
     final locale = Localizations.localeOf(context);
     final isTamil = locale.languageCode == 'ta';
+    final l10n = AppLocalizations.of(context)!;
 
-    // For display name, use Tamil if selected, else English
+    // Get ward name in current language
     final wardDisplayName = isTamil
-        ? AppLocalizations.of(context)!.dynamicLookup('wardName$wardNo') ?? wardName
+        ? l10n.getWardName(wardNo) ?? wardName
         : wardName;
 
     // Get councillor info
@@ -768,35 +770,45 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     String councillorPhoto = _councillorData[wardNo]?['photo'] ?? '';
 
     if (isTamil) {
-      // Fetch name, party, responsibility from localization file if in Tamil
-      final nameKey = 'councillor_${wardNo}_name';
-      final partyKey = 'councillor_${wardNo}_party';
-      final responsibilityKey = 'councillor_${wardNo}_responsibility';
+      // Get Tamil translations from app_ta.arb
+      final councillorDetails = l10n.getCouncillorDetails(wardNo);
+      
+      councillorName = councillorDetails['name'] ?? '';
+      councillorParty = councillorDetails['party'] ?? '';
+      councillorResponsibility = councillorDetails['responsibility'] ?? '';
 
-      councillorName = AppLocalizations.of(context)!.dynamicLookup(nameKey) ?? 'No councillor details available';
-      councillorParty = AppLocalizations.of(context)!.dynamicLookup(partyKey) ?? '';
-      councillorResponsibility = AppLocalizations.of(context)!.dynamicLookup(responsibilityKey) ?? '';
+      // If any Tamil translation is missing, fall back to English data
+      if (councillorName.isEmpty && _councillorData.containsKey(wardNo)) {
+        debugPrint('[_MapPageState] Falling back to English data for councillor name');
+        councillorName = _councillorData[wardNo]?['name'] ?? 'மன்ற உறுப்பினர் விவரங்கள் கிடைக்கவில்லை';
+      }
+      if (councillorParty.isEmpty && _councillorData.containsKey(wardNo)) {
+        debugPrint('[_MapPageState] Falling back to English data for party');
+        councillorParty = _councillorData[wardNo]?['party'] ?? '';
+      }
+      if (councillorResponsibility.isEmpty && _councillorData.containsKey(wardNo)) {
+        debugPrint('[_MapPageState] Falling back to English data for responsibility');
+        councillorResponsibility = _councillorData[wardNo]?['responsibility'] ?? '';
+      }
 
-      // Use English fallback if Tamil data is missing for these fields
-      if (councillorName == 'No councillor details available' && _councillorData.containsKey(wardNo)) {
-          councillorName = _councillorData[wardNo]?['name'] ?? 'No councillor details available';
+      // If still no data available, show a message in Tamil
+      if (councillorName.isEmpty) {
+        debugPrint('[_MapPageState] No data available in either Tamil or English for ward $wardNo');
+        councillorName = 'மன்ற உறுப்பினர் விவரங்கள் கிடைக்கவில்லை';
       }
-       if (councillorParty == '' && _councillorData.containsKey(wardNo)) {
-          councillorParty = _councillorData[wardNo]?['party'] ?? '';
-      }
-       if (councillorResponsibility == '' && _councillorData.containsKey(wardNo)) {
-          councillorResponsibility = _councillorData[wardNo]?['responsibility'] ?? '';
-      }
-
     } else {
       // Fetch all councillor info from HTML data if not in Tamil
+      debugPrint('[_MapPageState] Fetching English councillor data for ward $wardNo');
       Map<String, String>? councillorInfo = _councillorData[wardNo];
       councillorName = councillorInfo?['name'] ?? 'No councillor details available';
       councillorParty = councillorInfo?['party'] ?? '';
       councillorResponsibility = councillorInfo?['responsibility'] ?? '';
     }
 
-    debugPrint('[_MapPageState] Retrieved councillor info for ward $wardNo: $councillorName');
+    debugPrint('[_MapPageState] Final councillor details for ward $wardNo:');
+    debugPrint('  - Name: $councillorName');
+    debugPrint('  - Party: $councillorParty');
+    debugPrint('  - Responsibility: $councillorResponsibility');
 
     // Get ward data from the ward data map
     var wardInfo = maduraiWards['Ward $wardNo'];
