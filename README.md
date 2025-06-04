@@ -1,86 +1,204 @@
-# Madurai - Ward Information System
+Here is a comprehensive README.md template for your project, covering all the steps needed to get the project running, including key management, Supabase setup, and required assets.
 
-A Flutter application that provides detailed information about the wards of Madurai city, including ward boundaries, councillor details, and local facilities.
+---
 
-## Features
+# Madurai Ward Information App
 
-- Interactive map showing all wards of Madurai
-- Detailed ward information including:
-  - Ward boundaries and areas
-  - Population statistics
-  - Local facilities and amenities
-  - Councillor information with contact details
-- Search functionality to find specific wards
-- Responsive UI with smooth animations
-- Dark mode support
-- Location-based services
+A Flutter application that displays ward-wise information for Madurai city, including ward boundaries, councillor details, and ward-specific information.
 
-## Technical Details
+---
 
-### Built With
-
-- Flutter 3.32.1
-- Google Maps Flutter
-- Supabase for backend services
-- Geolocator for location services
-- Various Flutter packages for enhanced functionality
-
-### Dependencies
-
-Key dependencies include:
-- `google_maps_flutter`: ^2.5.3
-- `supabase_flutter`: ^2.3.4
-- `geolocator`: ^10.1.0
-- `flutter_polyline_points`: ^2.0.0
-- `flutter_dotenv`: ^5.1.0
-- `image_picker`: ^1.0.7
-- `geocoding`: ^2.1.1
-- And more (see pubspec.yaml for complete list)
-
-## Getting Started
-
-### Prerequisites
+## Prerequisites
 
 - Flutter SDK (3.0.0 or higher)
-- Android Studio / Xcode
-- Google Maps API Key
-- Supabase Account
+- Dart SDK (3.0.0 or higher)
+- Xcode (for iOS development)
+- Android Studio (for Android development)
+- Google Maps API key
+- Supabase account
 
-### Installation
+---
 
-1. Clone the repository:
+## Setup Instructions
+
+### 1. Clone the Repository
+
 ```bash
-git clone https://github.com/yourusername/madurai.git
+git clone https://github.com/Aadithyaa-Ravishankar/Madurai.git
+cd Madurai
 ```
 
-2. Install dependencies:
+---
+
+### 2. Saving API Keys (Google Maps & Supabase)
+
+**For production builds, keys are stored in `lib/config/config.dart` as constants.**
+
+Create a file at `lib/config/config.dart` with the following content:
+
+```dart
+class Config {
+  static const String supabaseUrl = 'YOUR_SUPABASE_URL';
+  static const String supabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY';
+  static const String supabaseServiceRole = 'YOUR_SUPABASE_SERVICE_ROLE';
+  static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
+}
+```
+
+Replace the placeholder values with your actual keys.
+
+---
+
+### 3. Supabase Setup
+
+#### a. Create a Supabase Project
+
+1. Go to [Supabase](https://app.supabase.com/) and create a new project.
+2. Get your Supabase URL and Anon/Public API Key from the project settings.
+
+#### b. Database Tables
+
+**Profiles Table:**
+```sql
+create table profiles (
+  id uuid references auth.users on delete cascade,
+  updated_at timestamp with time zone,
+  username text unique,
+  full_name text,
+  avatar_url text,
+  ward_number text,
+  primary key (id)
+);
+
+alter table profiles enable row level security;
+
+create policy "Public profiles are viewable by everyone."
+  on profiles for select
+  using ( true );
+
+create policy "Users can insert their own profile."
+  on profiles for insert
+  with check ( auth.uid() = id );
+
+create policy "Users can update own profile."
+  on profiles for update
+  using ( auth.uid() = id );
+```
+
+**Complaints Table:**
+```sql
+create table complaints (
+  id uuid default uuid_generate_v4() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  user_id uuid references auth.users not null,
+  ward_number text not null,
+  title text not null,
+  description text,
+  status text default 'pending',
+  image_urls text[],
+  location_lat double precision,
+  location_lng double precision
+);
+
+alter table complaints enable row level security;
+
+create policy "Users can view their own complaints"
+  on complaints for select
+  using (auth.uid() = user_id);
+
+create policy "Users can create their own complaints"
+  on complaints for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their own complaints"
+  on complaints for update
+  using (auth.uid() = user_id);
+```
+
+---
+
+### 4. Required Assets
+
+Place the following files in the `assets` directory:
+
+- `assets/madurai_wards.geojson` — GeoJSON file containing ward boundaries
+- `assets/councillor.html` — HTML file containing councillor information
+- `assets/images/image-1.png` — App logo/icon
+- `assets/images/image-2.png` — Additional app image
+
+Make sure your `pubspec.yaml` includes these assets:
+
+```yaml
+flutter:
+  assets:
+    - assets/images/image-1.png
+    - assets/images/image-2.png
+    - assets/madurai_wards.geojson
+    - assets/councillor.html
+```
+
+---
+
+### 5. iOS Setup
+
+1. Open `ios/Runner.xcworkspace` in Xcode.
+2. In `ios/Runner/AppDelegate.swift`, set the Google Maps API key:
+   ```swift
+   GMSServices.provideAPIKey(Config.googleMapsApiKey)
+   ```
+3. Update the bundle identifier in Xcode.
+4. Enable necessary capabilities:
+   - Location Services
+   - Camera
+   - Photo Library
+   - Microphone
+
+---
+
+### 6. Android Setup
+
+1. Open `android/app/build.gradle.kts` and set your applicationId if needed.
+2. In `android/app/src/main/AndroidManifest.xml`, add your Google Maps API key:
+   ```xml
+   <meta-data android:name="com.google.android.geo.API_KEY"
+              android:value="YOUR_GOOGLE_MAPS_API_KEY"/>
+   ```
+3. Enable necessary permissions in `AndroidManifest.xml`:
+   - Location
+   - Camera
+   - Internet
+   - Storage
+
+---
+
+### 7. Install Dependencies
+
 ```bash
 flutter pub get
 ```
 
-3. Create a `.env` file in the root directory with the following variables:
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE=your_supabase_service_role
-GOOGLE_MAPS_API_KEY=your_google_maps_api_key
-```
+---
 
-4. Run the app:
+### 8. Run the App
+
 ```bash
 flutter run
 ```
+
+---
 
 ## Project Structure
 
 ```
 lib/
-├── config/           # Configuration files
-├── data/            # Data models and constants
-├── screens/         # UI screens
-├── services/        # Business logic and services
-└── main.dart        # Entry point
+├── config/           # Configuration files (config.dart, env.dart, supabase_config.dart)
+├── data/             # Data models and constants
+├── screens/          # UI screens
+├── services/         # Business logic and services
+└── main.dart         # Entry point
 ```
+
+---
 
 ## Contributing
 
@@ -90,13 +208,5 @@ lib/
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## License
+---
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Madurai Municipal Corporation for ward data
-- Google Maps Platform
-- Supabase for backend services
-- Flutter community for various packages and support
