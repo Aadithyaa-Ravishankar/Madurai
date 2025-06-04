@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
 import '../main.dart';
 import 'register.dart';
+import 'package:flutter/cupertino.dart';
 
 void main() {
   runApp(const MaterialApp(
@@ -23,6 +24,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
   bool _showLogin = false;
   bool _isLoading = false;
   String? _errorMessage;
+  bool _obscurePassword = true;
 
   @override
   void initState() {
@@ -55,7 +57,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
         // Navigate to the map page
         if (mounted) {
           Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (context) => const MapPage()),
+            CupertinoPageRoute(builder: (context) => const MapPage()),
           );
         }
       }
@@ -149,18 +151,21 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                 height: 148,
               ),
               const SizedBox(height: 48),
-              const Text(
-                'CORPORATION OF MADURAI',
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFFF0000),
+              const Center(
+                child: Text(
+                  'CORPORATION OF MADURAI',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFFFF0000),
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ),
               const SizedBox(height: 40),
               Container(
                 width: 345,
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
                   border: Border.all(color: const Color(0xFFE82A2D)),
                   borderRadius: BorderRadius.circular(8),
@@ -189,7 +194,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
                     const Text(
                       'Password *',
                       style: TextStyle(color: Color(0xFF1E1E1E)),
@@ -197,7 +202,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: _passwordController,
-                      obscureText: true,
+                      obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         hintText: 'Enter Password',
                         hintStyle: const TextStyle(color: Color(0xFFB3B3B3)),
@@ -208,6 +213,17 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                           borderSide: const BorderSide(color: Color(0xFFE82A2D)),
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                            color: Colors.grey,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
                         ),
                       ),
                     ),
@@ -221,7 +237,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -248,40 +264,34 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
                               ),
                       ),
                     ),
-                    const SizedBox(height: 24),
-                    TextButton(
-                      onPressed: () {},
-                      child: const Text(
-                        'Forgot password?',
-                        style: TextStyle(
-                          color: Color(0xFF0449F8),
-                          decoration: TextDecoration.underline,
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          "Don't have an account? ",
+                          style: TextStyle(color: Color(0xFF1E1E1E)),
                         ),
-                      ),
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              CupertinoPageRoute(
+                                builder: (context) => const RegisterPage(),
+                              ),
+                            );
+                          },
+                          child: const Text(
+                            'Sign Up',
+                            style: TextStyle(
+                              color: Color(0xFFE82A2D),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Don\'t have an account? ',
-                    style: TextStyle(color: Colors.black),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (context) => const RegisterPage()),
-                      );
-                    },
-                    child: const Text(
-                      'Register Here',
-                      style: TextStyle(color: Color(0xFF0449F8)),
-                    ),
-                  ),
-                ],
               ),
             ],
           ),

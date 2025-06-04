@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/supabase_config.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'login.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -14,6 +16,8 @@ class _RegisterPageState extends State<RegisterPage> {
   final _confirmPasswordController = TextEditingController();
   bool _isLoading = false;
   String? _errorMessage;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   @override
   void dispose() {
@@ -73,6 +77,22 @@ class _RegisterPageState extends State<RegisterPage> {
       print('Calling Supabase signUp with:');
       print('Email: $email');
       
+      // Check if user already exists
+      try {
+        final existingUser = await SupabaseConfig.client.auth.signInWithPassword(
+          email: email,
+          password: _passwordController.text,
+        );
+        if (existingUser.user != null) {
+          setState(() {
+            _errorMessage = 'This email is already registered';
+          });
+          return;
+        }
+      } catch (e) {
+        // User does not exist, proceed with registration
+      }
+      
       final response = await SupabaseConfig.client.auth.signUp(
         email: email,
         password: _passwordController.text,
@@ -87,11 +107,16 @@ class _RegisterPageState extends State<RegisterPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Registration successful! Please check your email for verification.'),
+              content: Text('Registration successful!'),
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.of(context).pop(); // Go back to login page
+          // Navigate to login page
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => const CombinedLoginPage(),
+            ),
+          );
         }
       } else {
         print('Registration failed: No user returned');
@@ -147,22 +172,23 @@ class _RegisterPageState extends State<RegisterPage> {
                 const SizedBox(height: 44),
                 Image.asset(
                   'assets/images/image-1.png',
-                  width: 139,
-                  height: 148,
+                  width: 100,
+                  height: 100,
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 24),
                 const Text(
                   'CORPORATION OF MADURAI',
                   style: TextStyle(
-                    fontSize: 32,
+                    fontSize: 24,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFFFF0000),
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 20),
                 Container(
                   width: 345,
-                  padding: const EdgeInsets.all(24),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
                     border: Border.all(color: const Color(0xFFE82A2D)),
                     borderRadius: BorderRadius.circular(8),
@@ -191,7 +217,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
                       const Text(
                         'Password *',
                         style: TextStyle(color: Color(0xFF1E1E1E)),
@@ -199,7 +225,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: _passwordController,
-                        obscureText: true,
+                        obscureText: _obscurePassword,
                         decoration: InputDecoration(
                           hintText: 'Enter Password',
                           hintStyle: const TextStyle(color: Color(0xFFB3B3B3)),
@@ -211,9 +237,20 @@ class _RegisterPageState extends State<RegisterPage> {
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Color(0xFFE82A2D)),
                           ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword ? Icons.visibility : Icons.visibility_off,
+                              color: Colors.grey,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
                       const Text(
                         'Confirm Password *',
                         style: TextStyle(color: Color(0xFF1E1E1E)),
@@ -221,7 +258,7 @@ class _RegisterPageState extends State<RegisterPage> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: _confirmPasswordController,
-                        obscureText: true,
+                        obscureText: _obscureConfirmPassword,
                         decoration: InputDecoration(
                           hintText: 'Confirm Password',
                           hintStyle: const TextStyle(color: Color(0xFFB3B3B3)),
@@ -232,6 +269,17 @@ class _RegisterPageState extends State<RegisterPage> {
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Color(0xFFE82A2D)),
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
+                              color: Colors.grey,
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscureConfirmPassword = !_obscureConfirmPassword;
+                              });
+                            },
                           ),
                         ),
                       ),
@@ -245,7 +293,7 @@ class _RegisterPageState extends State<RegisterPage> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(

@@ -13,13 +13,14 @@ import 'dart:ui' as ui;
 import 'dart:typed_data';
 import 'config/supabase_config.dart';
 import 'Screens/login.dart';
-import 'Screens/complaints.dart';
 import 'Screens/profile.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'widgets/bottom_toolbar.dart';
 import 'Screens/splash_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'services/map_service.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:app_links/app_links.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class TextBox {
   final LatLng center;
@@ -29,16 +30,29 @@ class TextBox {
   const TextBox(this.center, this.width, this.height);
 }
 
+// Add a global navigator key
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
     await SupabaseConfig.initialize();
+    
+    // Initialize deep link handling
+    _initDeepLinkHandling();
+
     runApp(const MyApp());
   } catch (e) {
     print('Error initializing Supabase: $e');
     // You might want to show an error screen here
     runApp(MaterialApp(
+      navigatorKey: navigatorKey,
+      title: 'Madurai',
+      theme: ThemeData(
+        primarySwatch: Colors.red,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
+      ),
       home: Scaffold(
         body: Center(
           child: Text('Failed to initialize app: $e'),
@@ -48,12 +62,37 @@ void main() async {
   }
 }
 
+void _initDeepLinkHandling() async {
+  final appLinks = AppLinks();
+
+  // Handle incoming links while the app is already running
+  appLinks.uriLinkStream.listen((uri) {
+    print('Got URI: $uri');
+    _handleDeepLink(uri);
+  }, onError: (err) {
+    print('Error handling deep link: $err');
+  });
+
+  // Handle incoming links when the app is launched from a link
+  final uri = await appLinks.getInitialAppLink();
+  if (uri != null) {
+    print('Initial URI: $uri');
+    _handleDeepLink(uri);
+  }
+}
+
+void _handleDeepLink(Uri uri) {
+  print('Handling deep link: $uri');
+  // Add any other deep link handling here if needed
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Madurai',
       theme: ThemeData(
         primarySwatch: Colors.red,
@@ -169,7 +208,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
 
   late AnimationController _animationController;
   late Animation<double> _animation;
-  int _currentIndex = 1; // 0: Complaints, 1: Home, 2: Profile
+  int _currentIndex = 0; // 0: Home, 1: Profile
 
   @override
   void initState() {
@@ -427,9 +466,19 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
 
     for (var row in rows) {
       final cells = row.querySelectorAll('td');
+      debugPrint('Row has ${cells.length} cells');
+      
       if (cells.length >= 8) {
         final wardNoRaw = cells[0].text.trim();
-        final wardNo = wardNoRaw.replaceAll(RegExp(r'[^0-9]'), '');
+        debugPrint('Raw ward number text: "$wardNoRaw"');
+        
+        // Handle different formats of ward numbers
+        final wardNo = wardNoRaw
+            .replaceAll(RegExp(r'[^0-9]'), '') // Remove all non-numeric characters
+            .trim();
+        
+        debugPrint('Processed ward number: "$wardNo"');
+        
         final name = cells[1].text.trim();
         final address = cells[2].text.trim();
         final contact = cells[3].text.trim();
@@ -438,23 +487,43 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         final party = cells[6].text.trim();
         final photo = cells[7].querySelector('img')?.attributes['src'] ?? '';
 
-        debugPrint('Parsed ward $wardNo: $name');
-
-        _councillorData[wardNo] = {
-          'name': name,
-          'address': address,
-          'contact': contact,
-          'email': email,
-          'responsibility': responsibility,
-          'party': party,
-          'photo': photo,
-        };
+        if (wardNo.isNotEmpty) {
+          debugPrint('Adding data for ward $wardNo:');
+          debugPrint('- Name: $name');
+          debugPrint('- Party: $party');
+          debugPrint('- Photo URL: $photo');
+          
+          _councillorData[wardNo] = {
+            'name': name,
+            'address': address,
+            'contact': contact,
+            'email': email,
+            'responsibility': responsibility,
+            'party': party,
+            'photo': photo,
+          };
+        } else {
+          debugPrint('Failed to parse ward number from: $wardNoRaw');
+        }
       } else {
         debugPrint('Row has insufficient cells: ${cells.length}');
+        if (cells.isNotEmpty) {
+          debugPrint('First cell content: ${cells[0].text.trim()}');
+        }
       }
     }
-    debugPrint('Finished parsing councillor data. Total entries: ${_councillorData.length}');
+    
+    debugPrint('\nFinal councillor data summary:');
+    debugPrint('Total entries: ${_councillorData.length}');
     debugPrint('Available ward numbers: ${_councillorData.keys.join(', ')}');
+    
+    // Check specifically for ward 48
+    if (_councillorData.containsKey('48')) {
+      debugPrint('\nWard 48 data found:');
+      debugPrint(_councillorData['48'].toString());
+    } else {
+      debugPrint('\nWard 48 data NOT found in _councillorData');
+    }
   }
 
   List<Color> _colorWards(List<List<LatLng>> wardPoints) {
@@ -692,6 +761,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     final wardNo = _wardNumbers[wardIndex];
 
     Map<String, String>? councillorInfo = _councillorData[wardNo];
+    debugPrint('Dialog for wardNo: $wardNo, councillorInfo: $councillorInfo');
     String councillorName = councillorInfo?['name'] ?? 'No councillor details available';
     String councillorAddress = councillorInfo?['address'] ?? '';
     String councillorContact = councillorInfo?['contact'] ?? '';
@@ -1265,6 +1335,59 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: Drawer(
+        width: MediaQuery.of(context).size.width * 0.5,
+        child: Container(
+          color: Colors.white,
+          child: Column(
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                ),
+                child: const Center(
+                  child: Text(
+                    'Madurai',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.home, color: Colors.red),
+                title: const Text('Home'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _resetView();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.person, color: Colors.red),
+                title: const Text('Profile'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    CupertinoPageRoute(builder: (context) => const ProfilePage()),
+                  );
+                },
+              ),
+              const Spacer(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _signOut();
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
       body: Stack(
         children: [
           GestureDetector(
@@ -1370,7 +1493,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.start,
               children: [
-                // Logout button on the left
+                // Menu button on the left
                 Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -1383,12 +1506,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                       ),
                     ],
                   ),
-                  child: IconButton(
-                    icon: const Icon(Icons.logout),
-                    onPressed: _signOut,
-                    tooltip: 'Logout',
-                    color: Colors.red,
-                    padding: EdgeInsets.zero,
+                  child: Builder(
+                    builder: (context) => IconButton(
+                      icon: const Icon(Icons.menu, color: Colors.red),
+                      onPressed: () {
+                        Scaffold.of(context).openDrawer();
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1539,15 +1663,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
                   ],
                 ),
               ],
-            ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
-              child: const BottomToolbar(currentIndex: 1),
             ),
           ),
         ],

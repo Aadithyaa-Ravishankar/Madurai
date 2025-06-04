@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
-import '../widgets/bottom_toolbar.dart';
+import 'package:flutter/cupertino.dart';
+
 import '../config/supabase_config.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../widgets/map_picker.dart';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 import 'login.dart';
+import '../main.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -203,6 +205,74 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: Drawer(
+        width: MediaQuery.of(context).size.width * 0.5,
+        child: Container(
+          color: Colors.white,
+          child: Column(
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                ),
+                child: const Center(
+                  child: Text(
+                    'Madurai',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.home, color: Colors.red),
+                title: const Text('Home'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).pushReplacement(
+                    CupertinoPageRoute(builder: (context) => const MapPage()),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.person, color: Colors.red),
+                title: const Text('Profile'),
+                onTap: () {
+                  Navigator.pop(context);
+                },
+              ),
+              const Spacer(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text('Logout'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  try {
+                    await SupabaseConfig.client.auth.signOut();
+                    if (mounted) {
+                      Navigator.of(context).pushReplacement(
+                        CupertinoPageRoute(builder: (context) => const CombinedLoginPage()),
+                      );
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Error signing out'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
       appBar: AppBar(
         title: const Text(
           'Profile',
@@ -215,42 +285,31 @@ class _ProfilePageState extends State<ProfilePage> {
         foregroundColor: Colors.black,
         elevation: 0.5,
         automaticallyImplyLeading: false,
-        actions: [
-          TextButton.icon(
-            onPressed: () async {
-              try {
-                await SupabaseConfig.client.auth.signOut();
-                if (mounted) {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (context) => const CombinedLoginPage()),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Error signing out'),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              }
-            },
-            icon: const Icon(
-              Icons.logout,
-              color: Colors.red,
-              size: 20,
+        leading: Builder(
+          builder: (context) => Container(
+            margin: const EdgeInsets.only(left: 16, top: 8, bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
-            label: const Text(
-              'Logout',
-              style: TextStyle(
-                color: Colors.red,
-                fontSize: 16,
-              ),
+            child: IconButton(
+              icon: const Icon(Icons.menu, color: Colors.red),
+              onPressed: () {
+                Scaffold.of(context).openDrawer();
+              },
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              iconSize: 24,
             ),
           ),
-          const SizedBox(width: 8),
-        ],
+        ),
       ),
       backgroundColor: const Color(0xFFF9FAFB),
       body: Column(
@@ -344,12 +403,6 @@ class _ProfilePageState extends State<ProfilePage> {
                   _isEditing ? _buildUpdateForm() : _buildProfileInfo(),
                 ],
               ),
-            ),
-          ),
-          Container(
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: BottomToolbar(currentIndex: 2),
             ),
           ),
         ],
@@ -538,7 +591,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     onPressed: () async {
                       final result = await Navigator.push(
                         context,
-                        MaterialPageRoute(
+                        CupertinoPageRoute(
                           builder: (context) => MapPicker(
                             onLocationSelected: (address, lat, lng) {
                               setState(() {
