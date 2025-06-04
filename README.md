@@ -1,7 +1,3 @@
-Here is a comprehensive README.md template for your project, covering all the steps needed to get the project running, including key management, Supabase setup, and required assets.
-
----
-
 # Madurai Ward Information App
 
 A Flutter application that displays ward-wise information for Madurai city, including ward boundaries, councillor details, and ward-specific information.
