@@ -242,6 +242,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     _initializeMapData();
   }
 
+<<<<<<< HEAD
   void _setupSearchController() {
     _searchController.addListener(() {
       if (!mounted) return;
@@ -255,7 +256,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         _removeOverlay();
       }
     });
-  }
 
   @override
   void didChangeDependencies() {
@@ -270,6 +270,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     }
   }
 
+=======
+>>>>>>> ebf7864dde84d5747059aa320beaa0ae9b4b6a4f
   void _handleDeepLink(Uri uri) {
     print('Handling deep link: $uri');
     // Extract ward number from the URI if present
@@ -282,8 +284,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _showWardDetails(wardIndex);
         });
-      }
-    }
   }
 
   Future<void> _initializeMapData() async {
@@ -1857,7 +1857,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
       ));
       if (!mounted) return;
       final data = jsonDecode(response.body);
-
       if (data["status"] == "OK" && 
           data["results"] != null && 
           data["results"] is List && 
@@ -1875,21 +1874,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         }
         
         final searchLocation = LatLng(lat.toDouble(), lng.toDouble());
-
-        // Find the ward that contains this location
-        String? wardNumber;
-        String? wardName;
-        bool isInMadurai = false;
-        
-        if (_mapService.polygons.isNotEmpty && _wardNumbers.isNotEmpty && _wardNames.isNotEmpty) {
-          for (int i = 0; i < _mapService.polygons.length; i++) {
-            if (i < _wardNumbers.length && i < _wardNames.length &&
-                _isPointInPolygon(searchLocation, _mapService.polygons.elementAt(i).points)) {
-              wardNumber = _wardNumbers[i];
-              wardName = _wardNames[i];
-              isInMadurai = true;
-              break;
-            }
           }
         }
 
