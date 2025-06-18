@@ -242,7 +242,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     _initializeMapData();
   }
 
-<<<<<<< HEAD
   void _setupSearchController() {
     _searchController.addListener(() {
       if (!mounted) return;
@@ -256,6 +255,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         _removeOverlay();
       }
     });
+  }
 
   @override
   void didChangeDependencies() {
@@ -270,8 +270,6 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     }
   }
 
-=======
->>>>>>> ebf7864dde84d5747059aa320beaa0ae9b4b6a4f
   void _handleDeepLink(Uri uri) {
     print('Handling deep link: $uri');
     // Extract ward number from the URI if present
@@ -284,9 +282,12 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _showWardDetails(wardIndex);
         });
+      }
+    }
   }
 
   Future<void> _initializeMapData() async {
+    print('Initializing map data...');
     // Load councillor data first as it's smaller
     await _loadCouncillorHtml();
     
@@ -294,6 +295,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     if (!_mapService.isMapReady) {
       await _loadGeoJSON();
     }
+    print('Map data initialization completed');
   }
 
   @override
@@ -676,12 +678,12 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   }
 
   LatLng _calculateCentroid(List<LatLng> points) {
-    if (points.isEmpty) return LatLng(0, 0);
+    if (points.isEmpty) return const LatLng(0, 0);
     
     double sumLat = 0;
     double sumLng = 0;
     
-    for (var point in points) {
+    for (final point in points) {
       sumLat += point.latitude;
       sumLng += point.longitude;
     }
@@ -690,7 +692,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   }
 
   LatLng _findLabelPosition(List<LatLng> points) {
-    if (points.isEmpty) return LatLng(0, 0);
+    if (points.isEmpty) return const LatLng(0, 0);
 
     // First try the centroid
     LatLng centroid = _calculateCentroid(points);
@@ -1181,10 +1183,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   void _showSuggestions() {
     _removeOverlay();
     if (_searchSuggestions.isEmpty) return;
+    
     final RenderBox? searchBarBox = _searchBarKey.currentContext?.findRenderObject() as RenderBox?;
     if (searchBarBox == null) return;
+    
     final searchBarHeight = searchBarBox.size.height;
     final searchBarPosition = searchBarBox.localToGlobal(Offset.zero);
+    
     _overlayEntry = OverlayEntry(
       builder: (context) => Positioned(
         top: searchBarPosition.dy + searchBarHeight + 4,
@@ -1257,7 +1262,10 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         ),
       ),
     );
-    Overlay.of(context).insert(_overlayEntry!);
+    
+    if (mounted) {
+      Overlay.of(context).insert(_overlayEntry!);
+    }
   }
 
   void _removeOverlay() {
@@ -1332,56 +1340,325 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     }
   }
 
-  Future<void> _setMapStyle() async {
-    String style = '''
-      [
-        {
-          "featureType": "all",
-          "elementType": "labels",
-          "stylers": [
-            {
-              "visibility": "off"
-            }
-          ]
-        },
-        {
-          "featureType": "administrative",
-          "elementType": "geometry",
-          "stylers": [
-            {
-              "visibility": "off"
-            }
-          ]
-        },
-        {
-          "featureType": "poi",
-          "stylers": [
-            {
-              "visibility": "off"
-            }
-          ]
-        },
-        {
-          "featureType": "road",
-          "elementType": "labels",
-          "stylers": [
-            {
-              "visibility": "off"
-            }
-          ]
-        },
-        {
-          "featureType": "transit",
-          "stylers": [
-            {
-              "visibility": "off"
-            }
-          ]
-        }
-      ]
+  void _setMapStyle() {
+    print('Setting custom map style to hide default labels...');
+    
+    const String mapStyle = '''
+    [
+      {
+        "featureType": "administrative",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "administrative",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "administrative",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "administrative",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "poi",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "poi",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "poi",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "poi",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "road",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "road",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "road",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "road",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "road",
+        "elementType": "labels.icon",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "transit",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "transit",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "transit",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "transit",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "transit",
+        "elementType": "labels.icon",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "water",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "water",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "water",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "water",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.natural",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.natural",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.natural",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.natural",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.man_made",
+        "elementType": "labels",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.man_made",
+        "elementType": "labels.text",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.man_made",
+        "elementType": "labels.text.fill",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      },
+      {
+        "featureType": "landscape.man_made",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+          {
+            "visibility": "off"
+          }
+        ]
+      }
+    ]
     ''';
-    if (_mapService.mapController != null) {
-      await _mapService.mapController!.setMapStyle(style);
+    
+    if (_mapController != null) {
+      _mapController!.setMapStyle(mapStyle);
+      print('Custom map style applied successfully');
+    } else {
+      print('Map controller not available for style setting');
     }
   }
 
@@ -1811,21 +2088,22 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   }
 
   bool _isPointInPolygon(LatLng point, List<LatLng> polygon) {
-    bool isInside = false;
+    if (polygon.length < 3) return false;
+    
+    bool inside = false;
     int j = polygon.length - 1;
-
+    
     for (int i = 0; i < polygon.length; i++) {
-      if ((polygon[i].latitude > point.latitude) != (polygon[j].latitude > point.latitude) &&
+      if (((polygon[i].latitude > point.latitude) != (polygon[j].latitude > point.latitude)) &&
           (point.longitude < (polygon[j].longitude - polygon[i].longitude) * 
-          (point.latitude - polygon[i].latitude) / 
-          (polygon[j].latitude - polygon[i].latitude) + 
-          polygon[i].longitude)) {
-        isInside = !isInside;
+           (point.latitude - polygon[i].latitude) / 
+           (polygon[j].latitude - polygon[i].latitude) + polygon[i].longitude)) {
+        inside = !inside;
       }
       j = i;
     }
-
-    return isInside;
+    
+    return inside;
   }
 
   Future<void> _signOut() async {
@@ -1843,6 +2121,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
 
   Future<void> _searchLocation(String address) async {
     if (!mounted) return;
+    print('Searching for location: $address');
     _mapService.clearSearchMarkers();
     
     final apiKey = _placesApiKey;
@@ -1857,6 +2136,7 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
       ));
       if (!mounted) return;
       final data = jsonDecode(response.body);
+
       if (data["status"] == "OK" && 
           data["results"] != null && 
           data["results"] is List && 
@@ -1874,6 +2154,22 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         }
         
         final searchLocation = LatLng(lat.toDouble(), lng.toDouble());
+        print('Found location: $searchLocation');
+
+        // Find the ward that contains this location
+        String? wardNumber;
+        String? wardName;
+        bool isInMadurai = false;
+        
+        if (_mapService.polygons.isNotEmpty && _wardNumbers.isNotEmpty && _wardNames.isNotEmpty) {
+          for (int i = 0; i < _mapService.polygons.length; i++) {
+            if (i < _wardNumbers.length && i < _wardNames.length &&
+                _isPointInPolygon(searchLocation, _mapService.polygons.elementAt(i).points)) {
+              wardNumber = _wardNumbers[i];
+              wardName = _wardNames[i];
+              isInMadurai = true;
+              break;
+            }
           }
         }
 
