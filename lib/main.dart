@@ -23,6 +23,11 @@ import 'package:flutter/cupertino.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'config/config.dart';
+import 'package:flutter/widgets.dart';
+import 'main.dart' show routeObserver; // Import the RouteObserver
+
+// Add this at the top-level, before main()
+final RouteObserver<PageRoute> routeObserver = RouteObserver<PageRoute>();
 
 class TextBox {
   final LatLng center;
@@ -88,6 +93,7 @@ class MyApp extends StatelessWidget {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       home: SplashScreen(initialDeepLink: initialDeepLink),
+      navigatorObservers: [routeObserver], // <-- Add this line
     );
   }
 }
@@ -123,7 +129,7 @@ class MapPage extends StatefulWidget {
   State<MapPage> createState() => _MapPageState();
 }
 
-class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
+class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
   final MapService _mapService = MapService();
   GoogleMapController? _mapController;
   List<String> _wardNames = [];
@@ -145,6 +151,9 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
 
   // Add for Google Places API
   final String _placesApiKey = Config.googleMapsApiKey;
+
+  // Add flag to track navigation state
+  bool _isReturningFromNavigation = false;
 
   // Enhanced ward colors with better visibility and contrast
   final List<Color> _wardColors = [
@@ -218,6 +227,9 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    // Add observer for app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
+    
     if (_placesApiKey.isEmpty) {
       print('Warning: Google Maps API key is empty!');
     }
@@ -242,6 +254,19 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     _initializeMapData();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // App has become active again, ensure map data is loaded
+      print('App resumed, checking map data...');
+      if (_mapService.polygons.isEmpty) {
+        print('Polygons are empty on app resume, reinitializing...');
+        _initializeMapData();
+      }
+    }
+  }
+
   void _setupSearchController() {
     _searchController.addListener(() {
       if (!mounted) return;
@@ -260,6 +285,8 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // Subscribe to RouteObserver
+    routeObserver.subscribe(this, ModalRoute.of(context) as PageRoute);
     // Reset search state when returning to the page
     if (!_isSearching && _searchController.text.isNotEmpty) {
       _searchController.clear();
@@ -267,6 +294,20 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
         _searchSuggestions = [];
       });
       _removeOverlay();
+    }
+    
+    // Reinitialize map data when returning to the page to ensure polygons and ward data are loaded
+    // This fixes the issue where location search shows "outside Madurai city limits" after navigation
+    if (_mapService.isMapReady && _mapService.polygons.isEmpty) {
+      print('Reinitializing map data on page re-entry...');
+      _initializeMapData();
+    }
+    
+    // If map controller exists but polygons are empty, reset and reinitialize
+    if (_mapController != null && _mapService.polygons.isEmpty) {
+      print('Map controller exists but polygons are empty, resetting map state...');
+      _mapService.resetMapState();
+      _initializeMapData();
     }
   }
 
@@ -291,15 +332,17 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     // Load councillor data first as it's smaller
     await _loadCouncillorHtml();
     
-    // Then load GeoJSON data
-    if (!_mapService.isMapReady) {
-      await _loadGeoJSON();
-    }
+    // Always load GeoJSON data to ensure polygons are available for location search
+    // This fixes the issue where location search fails after navigation
+    await _loadGeoJSON();
     print('Map data initialization completed');
   }
 
   @override
   void dispose() {
+    // Remove observer to prevent memory leaks
+    WidgetsBinding.instance.removeObserver(this);
+    routeObserver.unsubscribe(this); // Unsubscribe from RouteObserver
     _animationController.dispose();
     _searchController.dispose();
     _removeOverlay();
@@ -307,6 +350,13 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     _httpClient.close();
     // Don't dispose the map controller here as it's managed by MapService
     super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    // Called when coming back to this page (e.g., from Profile)
+    _initializeMapData();
+    setState(() {}); // Ensure UI updates if needed
   }
 
   Future<void> _loadGeoJSON() async {
@@ -2580,10 +2630,9 @@ class _MapPageState extends State<MapPage> with SingleTickerProviderStateMixin {
     _mapService.setMapController(controller);
     _setMapStyle();
     
-    // Only load data if not already loaded
-    if (!_mapService.isMapReady) {
-      _initializeMapData();
-    }
+    // Always reinitialize map data to ensure polygons are available for location search
+    // This fixes the issue where location search fails after navigation
+    _initializeMapData();
     
     // Clear any existing search markers when map is created/reloaded
     _mapService.clearSearchMarkers();

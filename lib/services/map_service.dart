@@ -69,6 +69,15 @@ class MapService {
     _mapBounds = bounds;
   }
 
+  void resetMapState() {
+    polygons.clear();
+    wardBoundaries.clear();
+    wardLabels.clear();
+    searchMarkers.clear();
+    _isLoading = true;
+    _isMapReady = false;
+  }
+
   void dispose() {
     _mapController?.dispose();
     _mapController = null;

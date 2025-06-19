@@ -57,7 +57,7 @@ class _CombinedLoginPageState extends State<CombinedLoginPage> {
         // Navigate to the map page
         if (mounted) {
           Navigator.of(context).pushReplacement(
-            CupertinoPageRoute(builder: (context) => const MapPage()),
+            CupertinoPageRoute(builder: (context) => MapPage(initialDeepLink: null)),
           );
         }
       }

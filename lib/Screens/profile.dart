@@ -232,7 +232,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.of(context).pushReplacement(
-                    CupertinoPageRoute(builder: (context) => const MapPage()),
+                    CupertinoPageRoute(builder: (context) => MapPage(initialDeepLink: null)),
                   );
                 },
               ),
