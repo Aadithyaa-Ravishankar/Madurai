@@ -2,9 +2,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'env.dart';
 
 class SupabaseConfig {
-  static const String supabaseUrl = 'https://buysnceknemtoiaqxhts.supabase.co';
-  static const String supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1eXNuY2VrbmVtdG9pYXF4aHRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg2MjQ0MzAsImV4cCI6MjA2NDIwMDQzMH0.e1xJrNbzqnVCoqHAnVFvJfzHt6zD0PC8hHgBmHY4lzk';
-  static const String supabaseServiceRole = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1eXNuY2VrbmVtdG9pYXF4aHRzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODYyNDQzMCwiZXhwIjoyMDY0MjAwNDMwfQ.dq1pP6LIrb4CE54Xexr-7gFVu4XoM5lE-g0uKKiP1-w';
+  static const String supabaseUrl = '';
+  static const String supabaseAnonKey = '';
+  static const String supabaseServiceRole = '';
   static const String redirectUrl = 'madurai://reset-password';
 
   static Future<void> initialize() async {
