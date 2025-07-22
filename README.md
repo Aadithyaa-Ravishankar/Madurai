@@ -4,6 +4,25 @@ A Flutter application that displays ward-wise information for Madurai city, incl
 
 ---
 
+## 📱 Screenshots
+
+<!-- Add actual screenshots here -->
+<p float="left">
+    <img src="screenshots/image1.jpeg" alt="Image 1" width="25%">
+    <img src="screenshots/image2.jpeg" alt="Image 2" width="25%">
+    <img src="screenshots/image3.jpeg" alt="Image 3" width="25%">
+    <img src="screenshots/image4.jpeg" alt="Image 4" width="25%">
+    <img src="screenshots/image5.jpeg" alt="Image 5" width="25%">
+    <img src="screenshots/image6.jpeg" alt="Image 6" width="25%">
+    <img src="screenshots/image7.jpeg" alt="Image 7" width="25%">
+    <img src="screenshots/image7.jpeg" alt="Image 8" width="25%">
+    <img src="screenshots/image7.jpeg" alt="Image 9" width="25%">
+    <img src="screenshots/image7.jpeg" alt="Image 10" width="25%">
+    <img src="screenshots/image7.jpeg" alt="Image 11" width="25%">
+</p>
+
+---
+
 ## Prerequisites
 
 - Flutter SDK (3.0.0 or higher)
