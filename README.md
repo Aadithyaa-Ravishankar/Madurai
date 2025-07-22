@@ -15,10 +15,10 @@ A Flutter application that displays ward-wise information for Madurai city, incl
     <img src="screenshots/image5.jpeg" alt="Image 5" width="25%">
     <img src="screenshots/image6.jpeg" alt="Image 6" width="25%">
     <img src="screenshots/image7.jpeg" alt="Image 7" width="25%">
-    <img src="screenshots/image7.jpeg" alt="Image 8" width="25%">
-    <img src="screenshots/image7.jpeg" alt="Image 9" width="25%">
-    <img src="screenshots/image7.jpeg" alt="Image 10" width="25%">
-    <img src="screenshots/image7.jpeg" alt="Image 11" width="25%">
+    <img src="screenshots/image8.jpeg" alt="Image 8" width="25%">
+    <img src="screenshots/image9.jpeg" alt="Image 9" width="25%">
+    <img src="screenshots/image10.jpeg" alt="Image 10" width="25%">
+    <img src="screenshots/image11.jpeg" alt="Image 11" width="25%">
 </p>
 
 ---
